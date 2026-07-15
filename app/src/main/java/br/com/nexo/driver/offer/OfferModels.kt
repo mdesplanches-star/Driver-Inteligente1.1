@@ -1,0 +1,103 @@
+package br.com.nexo.driver.offer
+
+enum class OfferSource { UBER, NINETY_NINE }
+
+enum class OfferKind { UBER_STANDARD, NINETY_NINE_STANDARD, NINETY_NINE_NEGOCIA }
+
+enum class FieldSource { OCR, ACCESSIBILITY, DERIVED }
+
+enum class OfferField {
+    PAYOUT,
+    PICKUP_DISTANCE,
+    PICKUP_DURATION,
+    TRIP_DISTANCE,
+    TRIP_DURATION,
+    PASSENGER_RATING,
+    STOP_COUNT,
+    LONG_TRIP,
+    DESTINATION_DIRECTION,
+}
+
+data class Confidence<T>(
+    val value: T?,
+    val score: Float,
+    val source: FieldSource,
+) {
+    init {
+        require(score in 0f..1f) { "Confidence must be between 0 and 1." }
+    }
+
+    fun isUsable(minimum: Float) = value != null && score >= minimum
+}
+
+@JvmInline
+value class Money(val cents: Long) {
+    init {
+        require(cents >= 0) { "Money cannot be negative: $cents" }
+    }
+}
+
+@JvmInline
+value class Distance(val meters: Long) {
+    init {
+        require(meters >= 0) { "Distance cannot be negative: $meters" }
+    }
+}
+
+@JvmInline
+value class Duration(val seconds: Long) {
+    init {
+        require(seconds >= 0) { "Duration cannot be negative: $seconds" }
+    }
+}
+
+data class GeoText(val address: String?, val locality: String?)
+
+data class OfferLeg(
+    val duration: Confidence<Duration>,
+    val distance: Confidence<Distance>,
+    val location: Confidence<GeoText>,
+)
+
+data class Passenger(
+    /** Rating scaled by 100, e.g. 4.95 is stored as 495. */
+    val rating: Confidence<Long>,
+    val tripCount: Confidence<Long>,
+    val profile: Confidence<String>,
+)
+
+data class LayoutMetadata(
+    val hasVerificationBadge: Boolean? = null,
+    val hasDynamicFare: Boolean? = null,
+    val hasLongWaitBonus: Boolean? = null,
+    val negotiationAlternatives: List<Money> = emptyList(),
+    val isTripRadar: Boolean? = null,
+)
+
+data class NormalizedOffer(
+    val source: OfferSource,
+    val kind: OfferKind,
+    val detectedAtEpochMs: Long,
+    val payout: Confidence<Money>,
+    val displayedRatePerKm: Confidence<Money>,
+    val bonus: Confidence<Money>,
+    val pickup: OfferLeg,
+    val trip: OfferLeg,
+    val passenger: Passenger,
+    val serviceType: Confidence<String>,
+    val stopCount: Confidence<Long>,
+    val longTripHint: Confidence<Boolean>,
+    val destinationDirectionHint: Confidence<Boolean>,
+    val rawLayoutVersion: String,
+    val fieldConfidence: Map<OfferField, Float>,
+    val metadata: LayoutMetadata = LayoutMetadata(),
+)
+
+data class DerivedMetrics(
+    val totalDistance: Confidence<Distance>,
+    val totalDuration: Confidence<Duration>,
+    /** BRL cents per kilometre. */
+    val ratePerKm: Confidence<Long>,
+    /** BRL cents per hour. */
+    val ratePerHour: Confidence<Long>,
+)

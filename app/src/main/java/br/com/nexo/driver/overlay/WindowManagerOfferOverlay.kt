@@ -1,0 +1,152 @@
+package br.com.nexo.driver.overlay
+
+import android.content.Context
+import android.graphics.PixelFormat
+import android.os.Looper
+import android.view.Gravity
+import android.view.WindowManager
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import br.com.nexo.driver.ui.theme.DriverInteligenteTheme
+import br.com.nexo.driver.ui.theme.DriverThemeMode
+
+/**
+ * Non-touchable overlay window. It deliberately cannot cover or activate controls from
+ * another app; placement and touch customization are introduced after capture validation.
+ * All methods must be called on the main thread.
+ */
+class WindowManagerOfferOverlay(context: Context) : AutoCloseable {
+    private val appContext = context.applicationContext
+    private val windowManager = context.getSystemService(WindowManager::class.java)
+    private val overlayModel = mutableStateOf<OfferOverlayUiModel?>(null)
+    private val appearance = mutableStateOf(OverlayAppearance())
+    private var view: ComposeView? = null
+    private var owners: OverlayViewTreeOwners? = null
+
+    fun show(
+        model: OfferOverlayUiModel,
+        themeMode: DriverThemeMode = DriverThemeMode.SYSTEM,
+        fontScale: Float = 1f,
+    ) {
+        checkMainThread()
+        require(fontScale > 0f) { "Overlay font scale must be positive." }
+        overlayModel.value = model
+        appearance.value = OverlayAppearance(themeMode, fontScale)
+        if (view != null) return
+        val viewTreeOwners = OverlayViewTreeOwners()
+        val composeView = ComposeView(appContext).apply {
+            setViewTreeLifecycleOwner(viewTreeOwners)
+            setViewTreeSavedStateRegistryOwner(viewTreeOwners)
+            setViewTreeViewModelStoreOwner(viewTreeOwners)
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                val currentAppearance = appearance.value
+                DriverInteligenteTheme(
+                    mode = currentAppearance.themeMode,
+                    fontScale = currentAppearance.fontScale,
+                ) {
+                    overlayModel.value?.let { OfferOverlayCard(it) }
+                }
+            }
+        }
+        try {
+            windowManager.addView(composeView, layoutParams())
+            view = composeView
+            owners = viewTreeOwners
+            viewTreeOwners.onAttached()
+        } catch (failure: RuntimeException) {
+            view = null
+            owners = null
+            runCatching { windowManager.removeViewImmediate(composeView) }
+            composeView.disposeComposition()
+            viewTreeOwners.onDetached()
+            overlayModel.value = null
+            throw failure
+        }
+    }
+
+    fun hide() {
+        checkMainThread()
+        val attachedView = view
+        view = null
+        if (attachedView != null) {
+            runCatching { windowManager.removeViewImmediate(attachedView) }
+            attachedView.disposeComposition()
+        }
+        owners?.onDetached()
+        owners = null
+        overlayModel.value = null
+    }
+
+    override fun close() = hide()
+
+    private fun checkMainThread() {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "Overlay windows must be managed from the main thread."
+        }
+    }
+
+    private fun layoutParams() = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            // The offer-analysis surface must never be fed back into our own MediaProjection OCR.
+            WindowManager.LayoutParams.FLAG_SECURE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        PixelFormat.TRANSLUCENT,
+    ).apply {
+        gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        y = 64
+        horizontalMargin = 0.04f
+        title = "DriverInteligenteOfferOverlay"
+    }
+
+    /** Supplies the owners normally inherited from an Activity's decor view. */
+    private class OverlayViewTreeOwners :
+        LifecycleOwner,
+        SavedStateRegistryOwner,
+        ViewModelStoreOwner {
+        private val lifecycleRegistry = LifecycleRegistry(this)
+        private val savedStateController = SavedStateRegistryController.create(this)
+
+        override val lifecycle: Lifecycle = lifecycleRegistry
+        override val savedStateRegistry: SavedStateRegistry = savedStateController.savedStateRegistry
+        override val viewModelStore = ViewModelStore()
+
+        init {
+            savedStateController.performAttach()
+            savedStateController.performRestore(null)
+            lifecycleRegistry.currentState = Lifecycle.State.CREATED
+        }
+
+        fun onAttached() {
+            lifecycleRegistry.currentState = Lifecycle.State.RESUMED
+        }
+
+        fun onDetached() {
+            if (lifecycleRegistry.currentState != Lifecycle.State.DESTROYED) {
+                lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+                viewModelStore.clear()
+            }
+        }
+    }
+
+    private data class OverlayAppearance(
+        val themeMode: DriverThemeMode = DriverThemeMode.SYSTEM,
+        val fontScale: Float = 1f,
+    )
+}
