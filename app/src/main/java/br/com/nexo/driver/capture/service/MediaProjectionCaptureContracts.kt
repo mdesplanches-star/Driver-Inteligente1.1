@@ -87,7 +87,14 @@ data class MediaProjectionFrameMetrics(
     val consumerFailures: Long = 0,
 )
 
-const val DEFAULT_MIN_FRAME_INTERVAL_MS = 250L
+/**
+ * Lower bound between accepted frames. This throttle is the first component of the one-second
+ * frame-to-overlay budget: a card that appears right after a rejected frame waits this long
+ * before its first frame is even accepted. Backpressure ([DEFAULT_MAX_PENDING_FRAMES] = 1)
+ * already prevents OCR overload while a recognition is in flight, so the interval only needs to
+ * bound idle-screen work, not protect the OCR stage.
+ */
+const val DEFAULT_MIN_FRAME_INTERVAL_MS = 100L
 const val DEFAULT_MAX_PENDING_FRAMES = 1
 const val DEFAULT_IMAGE_READER_MAX_IMAGES = 3
 const val DEFAULT_CAPTURE_MAX_MINOR_EDGE_PIXELS = 1080

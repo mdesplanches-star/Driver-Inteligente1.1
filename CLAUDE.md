@@ -18,9 +18,12 @@ tela. `namespace`/`applicationId`: `br.com.nexo.driver`.
 
 ## Arquitetura (módulo único `:app`)
 
-- `capture/` — `OfferCaptureService` (foreground service, `FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION`)
-  e `capture/service/` (orquestração de frames, throttle a 4fps, guard de sessão contra callbacks
-  tardios do MediaProjection).
+- `capture/` — `OfferCaptureService` (foreground service, `FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION`;
+  o manifest também declara `shortService`, usado só para satisfazer o contrato de
+  `startForegroundService` em starts rejeitados — sem ele o processo crasha com
+  `ForegroundServiceDidNotStartInTimeException`, verificado em S23/Android 16) e `capture/service/`
+  (orquestração de frames, throttle de 100ms + backpressure de 1 frame, guard de sessão contra
+  callbacks tardios do MediaProjection).
 - `ocr/` — contrato `LocalOcrEngine` + implementação `ocr/mlkit/MlKitBitmapOcrEngine` (ML Kit Text
   Recognition on-device, timeout de 750ms, chamado sempre fora da main thread).
 - `parser/` — `OfferTextParser`: regex/strings hardcoded pt-BR para telas Uber/99. Frágil a mudanças
@@ -50,6 +53,11 @@ migrar.
   segundo tracker (`postOcrLatency` em `OfferCaptureService`), que loga um aviso (`Log.w`) quando
   excedido — use isso para diferenciar "OCR lento" de "pipeline pós-OCR lento" ao investigar
   violações de latência.
+- Números reais medidos em Galaxy S23/Android 16 (`MlKitOcrLatencyBenchmark`, androidTest):
+  OCR cold-start 281ms; OCR quente p50 189ms @ minor edge 1080. Reduzir para 720 economizou só
+  ~30ms — decidiu-se manter 1080 para preservar o texto pequeno dos cards da 99. O throttle de
+  captura é 100ms (`DEFAULT_MIN_FRAME_INTERVAL_MS`); o backpressure de 1 frame já protege o OCR,
+  então não aumente o throttle para "aliviar" o OCR — isso só atrasa o primeiro frame do card.
 
 ## Build/release
 

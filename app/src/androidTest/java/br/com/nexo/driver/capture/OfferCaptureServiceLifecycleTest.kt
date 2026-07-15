@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,28 +17,20 @@ import org.junit.runner.RunWith
 class OfferCaptureServiceLifecycleTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @After
-    fun tearDown() {
-        OfferCaptureService.stop(context)
-    }
-
     @Test
-    fun deniedProjectionConsentStopsTheServiceWithoutStartingCapture() {
+    fun deniedProjectionConsentStopsTheServiceWithoutCrashingTheProcess() {
         // RESULT_CANCELED mirrors the user dismissing the system screen-capture consent dialog.
-        // onStartCommand must tear the session down immediately rather than start a
-        // MediaProjection/VirtualDisplay/OCR pipeline with no valid grant.
+        // The service must satisfy the startForegroundService() contract (startForeground with a
+        // permitted type) and then stop itself; skipping that kills the whole process with
+        // ForegroundServiceDidNotStartInTimeException. Deliberately no early stopService() here:
+        // stopping before onStartCommand has run reproduces a platform race instead of app logic.
         OfferCaptureService.start(context, Activity.RESULT_CANCELED, Intent())
 
-        assertFalse(waitUntilInactiveOrTimeout())
-    }
+        // Give the service time to run onStartCommand and self-stop, and give the OS time to
+        // deliver a pending ForegroundServiceDidNotStartInTimeException (which would crash this
+        // instrumentation process and fail the test).
+        Thread.sleep(3_000)
 
-    /** Polls the real, disk-backed runtime state instead of assuming synchronous IPC delivery. */
-    private fun waitUntilInactiveOrTimeout(timeoutMillis: Long = 5_000L): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMillis
-        while (System.currentTimeMillis() < deadline) {
-            if (!OfferCaptureService.isActive(context)) return false
-            Thread.sleep(100)
-        }
-        return OfferCaptureService.isActive(context)
+        assertFalse(OfferCaptureService.isActive(context))
     }
 }

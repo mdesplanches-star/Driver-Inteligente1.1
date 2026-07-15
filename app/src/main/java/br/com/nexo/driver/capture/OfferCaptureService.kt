@@ -99,12 +99,16 @@ class OfferCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action != ACTION_START) return START_NOT_STICKY
+        if (intent?.action != ACTION_START) {
+            // A stray start must not tear down a healthy capture session.
+            if (mediaProjection == null && frameOrchestrator == null) rejectStart()
+            return START_NOT_STICKY
+        }
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
         @Suppress("DEPRECATION")
         val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
         if (resultCode != Activity.RESULT_OK || resultData == null) {
-            stopCapture(CaptureStopReason.USER)
+            rejectStart()
             return START_NOT_STICKY
         }
 
@@ -124,6 +128,22 @@ class OfferCaptureService : Service() {
                     START_NOT_STICKY
                 },
             )
+    }
+
+    /**
+     * Satisfies the Context.startForegroundService() contract for a start that will never become
+     * a capture session (denied consent dialog, malformed intent). Skipping startForeground()
+     * crashes the whole process with ForegroundServiceDidNotStartInTimeException -- even when the
+     * service stops itself immediately (verified on a Galaxy S23 / Android 16). Promotion here
+     * uses the shortService type because the mediaProjection type is rejected by the OS without
+     * the user's screen-capture consent, and shortService needs no permission or declaration.
+     */
+    private fun rejectStart() {
+        if (!isForeground) {
+            runCatching { startInForeground(ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE) }
+                .onFailure { Log.e(TAG, "Foreground promotion for rejected start failed.", it) }
+        }
+        stopCapture(CaptureStopReason.USER)
     }
 
     override fun onDestroy() {
@@ -281,7 +301,9 @@ class OfferCaptureService : Service() {
         }
     }
 
-    private fun startInForeground() {
+    private fun startInForeground(
+        serviceType: Int = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+    ) {
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_view)
@@ -289,11 +311,7 @@ class OfferCaptureService : Service() {
             .setContentText("Lendo ofertas localmente nesta sessão.")
             .setOngoing(true)
             .build()
-        startForeground(
-            NOTIFICATION_ID,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
-        )
+        startForeground(NOTIFICATION_ID, notification, serviceType)
         isForeground = true
     }
 
