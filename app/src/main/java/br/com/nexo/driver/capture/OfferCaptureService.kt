@@ -236,6 +236,12 @@ class OfferCaptureService : Service() {
                 capturedAtEpochMs = System.currentTimeMillis(),
             ),
         )
+        output.unrecognizedLayoutSource?.let { source ->
+            // A known card marker (e.g. "UberX", "pgto. no app") was on screen but no parser
+            // could extract a complete offer from it -- likely the target app's layout/copy
+            // drifted from the hardcoded strings/regex this parser relies on.
+            Log.w(TAG, "Recognized $source offer card but failed to parse its fields (layout drift?).")
+        }
         val parsedOffer = output.offer ?: return
         if (output.isDuplicate) return
         // The platform-provided direction badge is intentionally discarded. A direction result is

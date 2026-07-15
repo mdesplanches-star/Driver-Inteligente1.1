@@ -64,6 +64,22 @@ class OfferOcrPipelineTest {
         assertFalse(result.shouldEmit)
     }
 
+    @Test
+    fun `flags a recognized card marker whose fields could not be parsed`() {
+        val pipeline = OfferOcrPipeline()
+
+        val result = pipeline.process(
+            OcrTextSnapshot(
+                blocks = listOf(OcrTextBlock("UberX", readingOrder = 0)),
+                capturedAtEpochMs = 1L,
+            ),
+        )
+
+        assertEquals(null, result.offer)
+        assertEquals(OfferSource.UBER, result.unrecognizedLayoutSource)
+        assertEquals(1L, pipeline.metrics().unrecognizedLayoutCount)
+    }
+
     private fun uberSnapshot(capturedAt: Long) = OcrTextSnapshot(
         blocks = listOf(
             OcrTextBlock("UberX", 0),

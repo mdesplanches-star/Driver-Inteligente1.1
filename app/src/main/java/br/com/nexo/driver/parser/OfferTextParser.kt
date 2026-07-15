@@ -25,6 +25,17 @@ interface OfferTextParser {
     fun parse(raw: RawOfferText): NormalizedOffer?
 }
 
+/**
+ * Result of a parse attempt that keeps the "a known offer card is on screen but its fields could
+ * not be extracted" case distinguishable from "no offer card is visible at all". The former means
+ * a parser's hardcoded strings/regex likely drifted from the current Uber/99 layout; the latter is
+ * the normal steady state between offers.
+ */
+data class OfferParseAttempt(
+    val offer: NormalizedOffer?,
+    val unrecognizedLayoutSource: OfferSource?,
+)
+
 class OfferParserRegistry(parsers: List<OfferTextParser> = listOf(UberTextParser(), NinetyNineTextParser())) {
     private val parsers = parsers
 
@@ -34,11 +45,18 @@ class OfferParserRegistry(parsers: List<OfferTextParser> = listOf(UberTextParser
      * card.  Prefer the platform with a card-specific marker, then let every eligible parser
      * try to extract a complete offer.
      */
-    fun parse(raw: RawOfferText): NormalizedOffer? = rankedParsers(raw)
-        .asSequence()
-        .filter { it.canParse(raw) }
-        .mapNotNull { it.parse(raw) }
-        .firstOrNull()
+    fun parse(raw: RawOfferText): NormalizedOffer? = parseAttempt(raw).offer
+
+    /**
+     * Same lookup as [parse], but also reports which platform's card marker matched when none of
+     * its parsers could extract a complete offer -- the signal a layout-drift alert is built on.
+     */
+    fun parseAttempt(raw: RawOfferText): OfferParseAttempt {
+        val eligible = rankedParsers(raw).filter { it.canParse(raw) }
+        val offer = eligible.asSequence().mapNotNull { it.parse(raw) }.firstOrNull()
+        val unrecognizedSource = if (offer == null) eligible.firstOrNull()?.source else null
+        return OfferParseAttempt(offer, unrecognizedSource)
+    }
 
     private fun rankedParsers(raw: RawOfferText): List<OfferTextParser> {
         val text = raw.text.lowercase()

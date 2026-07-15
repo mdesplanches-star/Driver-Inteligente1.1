@@ -24,7 +24,10 @@ tela. `namespace`/`applicationId`: `br.com.nexo.driver`.
 - `ocr/` — contrato `LocalOcrEngine` + implementação `ocr/mlkit/MlKitBitmapOcrEngine` (ML Kit Text
   Recognition on-device, timeout de 750ms, chamado sempre fora da main thread).
 - `parser/` — `OfferTextParser`: regex/strings hardcoded pt-BR para telas Uber/99. Frágil a mudanças
-  de layout dos apps-alvo (falha silenciosa hoje).
+  de layout dos apps-alvo. `OfferParserRegistry.parseAttempt()` distingue "nenhum card visível" de
+  "card reconhecido (ex.: 'UberX') mas campos não extraídos" — o segundo caso é logado como aviso
+  (`Log.w`) em `OfferCaptureService` e contado em `OfferOcrMetrics.unrecognizedLayoutCount`, servindo
+  de alerta de possível drift de layout em vez de falhar silenciosamente.
 - `evaluation/` — `OfferEvaluator`: cálculo de R$/km, R$/h e regras de filtro; protegido contra
   divisão por zero; dado ausente vira `MetricStatus.UNKNOWN` → decisão `ANALYZE` (nunca decide
   sozinho).

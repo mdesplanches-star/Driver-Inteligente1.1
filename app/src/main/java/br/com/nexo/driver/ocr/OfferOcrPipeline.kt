@@ -1,6 +1,7 @@
 package br.com.nexo.driver.ocr
 
 import br.com.nexo.driver.offer.NormalizedOffer
+import br.com.nexo.driver.offer.OfferSource
 import br.com.nexo.driver.parser.OfferParserRegistry
 import br.com.nexo.driver.parser.RawOfferText
 
@@ -48,6 +49,12 @@ data class OfferOcrOutput(
     val processingLatencyNanos: Long,
     /** True when an equivalent parsed offer was already emitted within the deduplication window. */
     val isDuplicate: Boolean,
+    /**
+     * Set when a known Uber/99 card marker was recognised in [raw] but no parser could extract a
+     * complete offer from it -- a likely sign the target app's layout/copy has drifted from the
+     * hardcoded strings/regex, rather than simply "no offer visible right now".
+     */
+    val unrecognizedLayoutSource: OfferSource? = null,
 ) {
     val processingLatencyMillis: Long get() = processingLatencyNanos / NANOS_PER_MILLISECOND
     val shouldEmit: Boolean get() = offer != null && !isDuplicate
@@ -59,6 +66,8 @@ data class OfferOcrMetrics(
     val duplicateOffers: Long = 0,
     val totalProcessingNanos: Long = 0,
     val maxProcessingNanos: Long = 0,
+    /** Snapshots where a recognised card marker failed to yield a complete offer. */
+    val unrecognizedLayoutCount: Long = 0,
 ) {
     val averageProcessingNanos: Long
         get() = if (processedSnapshots == 0L) 0L else totalProcessingNanos / processedSnapshots
@@ -79,7 +88,8 @@ class OfferOcrPipeline(
     fun process(snapshot: OcrTextSnapshot): OfferOcrOutput {
         val startedAt = clock.nowNanos()
         val raw = snapshot.toRawOfferText()
-        val offer = parserRegistry.parse(raw)
+        val attempt = parserRegistry.parseAttempt(raw)
+        val offer = attempt.offer
         val duplicate = offer?.let { deduplicator.isDuplicate(it) } ?: false
         val latency = (clock.nowNanos() - startedAt).coerceAtLeast(0L)
         metrics = metrics.copy(
@@ -88,8 +98,10 @@ class OfferOcrPipeline(
             duplicateOffers = metrics.duplicateOffers + if (duplicate) 1 else 0,
             totalProcessingNanos = metrics.totalProcessingNanos + latency,
             maxProcessingNanos = maxOf(metrics.maxProcessingNanos, latency),
+            unrecognizedLayoutCount = metrics.unrecognizedLayoutCount +
+                if (attempt.unrecognizedLayoutSource != null) 1 else 0,
         )
-        return OfferOcrOutput(raw, offer, latency, duplicate)
+        return OfferOcrOutput(raw, offer, latency, duplicate, attempt.unrecognizedLayoutSource)
     }
 
     @Synchronized

@@ -313,4 +313,33 @@ class OfferTextParserTest {
 
         assertEquals(false, offer?.longTripHint?.value)
     }
+
+    @Test
+    fun `reports the recognized source when a card marker is present but fields cannot be extracted`() {
+        // "UberX" is a real card marker, but there is no "R$" payout line -- the layout drifted
+        // (or OCR missed a block), so parsing must fail without silently pretending nothing
+        // was on screen.
+        val attempt = registry.parseAttempt(
+            RawOfferText(
+                text = """
+                    UberX
+                    4,89 (245)
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+            ),
+        )
+
+        assertEquals(null, attempt.offer)
+        assertEquals(OfferSource.UBER, attempt.unrecognizedLayoutSource)
+    }
+
+    @Test
+    fun `reports no unrecognized layout when no card marker is visible at all`() {
+        val attempt = registry.parseAttempt(
+            RawOfferText(text = "Texto sem card de oferta", capturedAtEpochMs = 1L),
+        )
+
+        assertEquals(null, attempt.offer)
+        assertEquals(null, attempt.unrecognizedLayoutSource)
+    }
 }
