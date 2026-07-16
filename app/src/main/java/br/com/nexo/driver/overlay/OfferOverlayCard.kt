@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -21,12 +23,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.nexo.driver.ui.theme.DriverInteligenteTheme
 
-private val OverlayShape = RoundedCornerShape(20.dp)
+private val OverlayShape = RoundedCornerShape(22.dp)
 
 /**
  * A compact, non-interactive card intended to sit immediately above an offer
@@ -42,15 +45,18 @@ fun OfferOverlayCard(
     val payoutColor = statusColor(
         if (model.isPayoutAvailable) model.payoutStatus else OverlayStatus.UNKNOWN,
     )
+    val background = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val textColor = MaterialTheme.colorScheme.onSurface
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = OverlayShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        border = BorderStroke(2.dp, decisionColor),
-        tonalElevation = 5.dp,
-        shadowElevation = 8.dp,
+        color = background,
+        border = BorderStroke(3.dp, decisionColor),
+        tonalElevation = 0.dp,
+        shadowElevation = 12.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -62,44 +68,56 @@ fun OfferOverlayCard(
                 }
             }
 
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "VALOR DA CORRIDA",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        letterSpacing = 0.8.sp,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor,
+                        letterSpacing = 1.sp,
                     )
                     Text(
                         text = model.payout,
-                        style = MaterialTheme.typography.headlineLarge.copy(fontSize = 40.sp),
+                        style = MaterialTheme.typography.headlineLarge.copy(fontSize = 38.sp),
                         fontWeight = FontWeight.ExtraBold,
                         color = payoutColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Column(horizontalAlignment = Alignment.End) {
+                Spacer(Modifier.width(8.dp))
+                Column(
+                    modifier = Modifier.weight(0.82f),
+                    horizontalAlignment = Alignment.End,
+                ) {
                     Text(
                         text = "TEMPO • DISTÂNCIA",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor,
                         letterSpacing = 0.8.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "${model.totalDuration} · ${if (model.totalDistance.isAvailable) model.totalDistance.value else "â€”"}",
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        text = "${model.totalDuration} · ${if (model.totalDistance.isAvailable) model.totalDistance.value else "—"}",
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
+                        fontWeight = FontWeight.ExtraBold,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
 
-            Spacer(Modifier.height(7.dp))
+            Spacer(Modifier.height(9.dp))
             OverlayMetricGrid(model)
         }
     }
@@ -108,12 +126,12 @@ fun OfferOverlayCard(
 @Composable
 private fun OverlayMetricGrid(model: OfferOverlayUiModel) {
     val metrics = model.gridFields.map { field -> field.label to model.metricFor(field) }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OverlayMetricCell(metrics[0].first, metrics[0].second, Modifier.weight(1f))
             OverlayMetricCell(metrics[1].first, metrics[1].second, Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OverlayMetricCell(metrics[2].first, metrics[2].second, Modifier.weight(1f))
             OverlayMetricCell(metrics[3].first, metrics[3].second, Modifier.weight(1f))
         }
@@ -128,23 +146,37 @@ private fun OverlayMetricCell(
 ) {
     val color = statusColor(if (metric.isAvailable) metric.status else OverlayStatus.UNKNOWN)
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.55f)),
+        modifier = modifier.heightIn(min = 70.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = color.copy(alpha = 0.16f),
+        border = BorderStroke(1.5.dp, color.copy(alpha = 0.9f)),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Column(modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(color),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = label.uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.height(1.dp))
             Text(
                 text = if (metric.isAvailable) metric.value else "—",
-                style = MaterialTheme.typography.titleMedium.copy(fontSize = 22.sp),
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge.copy(fontSize = 23.sp),
+                fontWeight = FontWeight.ExtraBold,
                 color = color,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -162,15 +194,15 @@ private fun StatusChip(status: OverlayStatus) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .background(color.copy(alpha = 0.16f))
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            .background(color)
+            .padding(horizontal = 13.dp, vertical = 6.dp),
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = color,
-            letterSpacing = 0.6.sp,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = statusContentColor(status),
+            letterSpacing = 0.8.sp,
         )
     }
 }
@@ -179,10 +211,10 @@ private fun StatusChip(status: OverlayStatus) {
 private fun HomeBadge() {
     Surface(
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.92f),
     ) {
         Text(
-            text = "⌂ Casa",
+            text = "⌂ Próximo de casa",
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
@@ -192,14 +224,19 @@ private fun HomeBadge() {
 }
 
 @Composable
-private fun statusColor(status: OverlayStatus): Color {
-    val colors = DriverInteligenteTheme.statusColors
-    return when (status) {
-        OverlayStatus.ACCEPT -> colors.accept
-        OverlayStatus.ANALYZE -> colors.analyze
-        OverlayStatus.REJECT -> colors.reject
-        OverlayStatus.UNKNOWN -> colors.unknown
-    }
+private fun statusColor(status: OverlayStatus): Color = when (status) {
+    OverlayStatus.ACCEPT -> DriverInteligenteTheme.statusColors.accept
+    OverlayStatus.ANALYZE -> DriverInteligenteTheme.statusColors.analyze
+    OverlayStatus.REJECT -> DriverInteligenteTheme.statusColors.reject
+    OverlayStatus.UNKNOWN -> DriverInteligenteTheme.statusColors.unknown
+}
+
+@Composable
+private fun statusContentColor(status: OverlayStatus): Color = when (status) {
+    OverlayStatus.ACCEPT -> DriverInteligenteTheme.statusColors.onAccept
+    OverlayStatus.ANALYZE -> DriverInteligenteTheme.statusColors.onAnalyze
+    OverlayStatus.REJECT -> DriverInteligenteTheme.statusColors.onReject
+    OverlayStatus.UNKNOWN -> DriverInteligenteTheme.statusColors.onUnknown
 }
 
 @Preview(showBackground = true, backgroundColor = 0xFFF5F5F5, widthDp = 380)

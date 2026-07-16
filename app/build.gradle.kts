@@ -44,6 +44,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Instrumented tests may install/uninstall this package without touching the signed
+            // app used by the driver on the device.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

@@ -154,6 +154,22 @@ class OfferEvaluatorTest {
         assertEquals(0, result.weightedScore)
     }
 
+    @Test
+    fun `evaluates ends near home independently from direction hint`() {
+        val offer = sampleOffer().copy(
+            endsNearHome = Confidence(true, 1f, FieldSource.DERIVED),
+            destinationDirectionHint = Confidence(false, 1f, FieldSource.OCR),
+        )
+
+        val result = OfferEvaluator().evaluate(
+            offer,
+            listOf(FilterRule(Metric.ENDS_NEAR_HOME, Comparator.IS_TRUE)),
+        )
+
+        assertEquals(MetricStatus.PASS, result.metrics.single().status)
+        assertEquals(OfferDecision.ACCEPT, result.decision)
+    }
+
     private fun sampleOffer() = NormalizedOffer(
         source = OfferSource.UBER,
         kind = OfferKind.UBER_STANDARD,

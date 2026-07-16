@@ -16,17 +16,19 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -35,6 +37,7 @@ import br.com.nexo.driver.evaluation.Comparator
 import br.com.nexo.driver.evaluation.EvaluationMode
 import br.com.nexo.driver.evaluation.FilterRule
 import br.com.nexo.driver.evaluation.Metric
+import br.com.nexo.driver.R
 
 /**
  * Read-only presentation of a profile's rules. The hosting screen owns persistence and opens
@@ -49,6 +52,7 @@ fun FiltersScreen(
     onRuleEnabledChange: (FilterRuleId, Boolean) -> Unit,
     onRuleClick: (FilterRuleId) -> Unit,
     onAddFilter: () -> Unit,
+    bottomBar: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val groupedRules = state.groupedRules()
@@ -57,9 +61,14 @@ fun FiltersScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Filtros") },
-                navigationIcon = { TextButton(onClick = onNavigateBack) { Text("Voltar") } },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Voltar")
+                    }
+                },
             )
         },
+        bottomBar = bottomBar,
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.padding(contentPadding),

@@ -17,6 +17,7 @@ data class RawOfferText(
     val text: String,
     val capturedAtEpochMs: Long,
     val layoutHint: String? = null,
+    val fieldSource: FieldSource = FieldSource.OCR,
 )
 
 interface OfferTextParser {
@@ -181,7 +182,7 @@ private fun parseCommon(
     val rate = lines.firstNotNullOfOrNull { line ->
         if (line.contains("/km", ignoreCase = true)) parseMoney(line) else null
     }
-    val rating = lines.firstNotNullOfOrNull(::parseRating)
+    val rating = parseRating(lines)
     val legs = lines.mapIndexedNotNull { index, line -> parseLeg(line)?.let { it to index } }
     val pickupLeg = legs.getOrNull(0)?.let { (leg, index) ->
         leg.withLocation(locationLineAfterLeg(lines, index))
@@ -233,8 +234,38 @@ private fun parseCommon(
                 emptyList()
             },
         ),
+    ).withFieldSource(raw.fieldSource)
+}
+
+private fun NormalizedOffer.withFieldSource(source: FieldSource): NormalizedOffer {
+    if (source == FieldSource.OCR) return this
+    return copy(
+        payout = payout.withSource(source),
+        displayedRatePerKm = displayedRatePerKm.withSource(source),
+        bonus = bonus.withSource(source),
+        pickup = pickup.withSource(source),
+        trip = trip.withSource(source),
+        passenger = passenger.withSource(source),
+        serviceType = serviceType.withSource(source),
+        stopCount = stopCount.withSource(source),
+        longTripHint = longTripHint.withSource(source),
+        destinationDirectionHint = destinationDirectionHint.withSource(source),
     )
 }
+
+private fun OfferLeg.withSource(source: FieldSource): OfferLeg = copy(
+    duration = duration.withSource(source),
+    distance = distance.withSource(source),
+    location = location.withSource(source),
+)
+
+private fun Passenger.withSource(source: FieldSource): Passenger = copy(
+    rating = rating.withSource(source),
+    tripCount = tripCount.withSource(source),
+    profile = profile.withSource(source),
+)
+
+private fun <T> Confidence<T>.withSource(source: FieldSource): Confidence<T> = copy(source = source)
 
 /** Selects money from the card, not a visible earnings chip behind the offer. */
 private fun findPayout(lines: List<String>, source: OfferSource, kind: OfferKind): Money? {
@@ -246,18 +277,56 @@ private fun findPayout(lines: List<String>, source: OfferSource, kind: OfferKind
         }
     }
     val offerRegion = if (cardStart >= 0) lines.drop(cardStart) else lines
-    return offerRegion.firstNotNullOfOrNull { line ->
-        if (line.contains("/km", true)) null else parseMoney(line)
+    // In Uber and 99 cards the large total precedes the displayed R$/km line.
+    // Dynamic fare, wait compensation and other additions are shown afterwards.
+    // If OCR misses the large total, returning null is safer than promoting an
+    // addition to the total payout.
+    val rateIndex = offerRegion.indexOfFirst { it.contains("/km", ignoreCase = true) }
+    val payoutRegion = if (rateIndex >= 0) offerRegion.take(rateIndex) else offerRegion
+    val candidates = payoutRegion.mapIndexedNotNull { index, line ->
+        if (!line.isPrimaryPayoutCandidate()) return@mapIndexedNotNull null
+        val adjacentSecondaryLabel = listOfNotNull(
+            payoutRegion.getOrNull(index - 1),
+            payoutRegion.getOrNull(index + 1),
+        ).any { adjacent -> hasSecondaryMoneyLabel(adjacent) && parseMoney(adjacent) == null }
+        if (adjacentSecondaryLabel && line.isStandaloneMoney()) null else parseMoney(line)
     }
+    return if (cardStart >= 0) candidates.firstOrNull() else candidates.lastOrNull()
+}
+
+private fun String.isPrimaryPayoutCandidate(): Boolean =
+    !contains("/km", true) &&
+        !contains("/h", true) &&
+        !hasSecondaryMoneyLabel(this) &&
+        parseMoney(this) != null
+
+private fun String.isStandaloneMoney(): Boolean = matches(
+    Regex("(?i)\\s*r\\$\\s*[\\d.]+(?:,[\\d]{1,2})?\\s*"),
+)
+
+private fun hasSecondaryMoneyLabel(line: String): Boolean {
+    val normalized = line.foldedForMatching()
+    return listOf(
+        "tarifa",
+        "dinamica",
+        "bonus",
+        "espera",
+        "custo",
+        "lucro",
+        "valor minimo",
+        "valor de embarque",
+        "taxa base",
+        "incluido",
+    ).any(normalized::contains)
 }
 
 private fun isUberServiceLine(line: String): Boolean =
-    line.matches(Regex("(?i)\\s*(uberx|uber black|uber comfort|uber flash|uber\\s*xl).*"))
+    line.matches(Regex("(?i)\\s*(?:\\d+\\s*)?(uber\\s*x|uber black|(?:uber\\s+)?comfort|uber flash|uber\\s*xl).*"))
 
 private fun parseLeg(line: String): OfferLeg? {
     val match = Regex("(?i)\\(?\\s*(\\d+)\\s*(?:min|minutos)\\s*(?:\\(\\s*)?([\\d.,]+)\\s*km\\s*\\)?").find(line) ?: return null
     val minutes = match.groupValues[1].toLongOrNull() ?: return null
-    val kilometres = match.groupValues[2].replace('.', ' ').replace(',', '.').replace(" ", "").toDoubleOrNull() ?: return null
+    val kilometres = parseDecimalKilometres(match.groupValues[2]) ?: return null
     val inlineAddress = line
         .substring(match.range.last + 1)
         .trim()
@@ -269,6 +338,17 @@ private fun parseLeg(line: String): OfferLeg? {
         distance = confident(Distance((kilometres * 1_000).toLong())),
         location = confident(inlineAddress?.let { GeoText(it, null) }),
     )
+}
+
+/** ML Kit may recognize the decimal separator as either comma or dot in pt-BR screenshots. */
+private fun parseDecimalKilometres(token: String): Double? {
+    val compact = token.replace(" ", "")
+    val normalized = if (',' in compact) {
+        compact.replace(".", "").replace(',', '.')
+    } else {
+        compact
+    }
+    return normalized.toDoubleOrNull()
 }
 
 private fun OfferLeg.withLocation(line: String?): OfferLeg = if (location.value != null) {
@@ -296,15 +376,31 @@ private fun moneyFromToken(token: String): Money? {
 }
 
 private fun parseRating(text: String): Long? {
-    if (text.contains("R$", ignoreCase = true) || text.contains("/km", ignoreCase = true)) return null
-    val hasRatingSignal = Regex("(?:â˜…|â­|\\bstar\\b|\\b(?:corrida|corridas|viagem|viagens)\\b)", RegexOption.IGNORE_CASE)
-        .containsMatchIn(text) ||
-        Regex("[0-5],[0-9]{1,2}\\s*\\(\\s*[+\\d.,]+\\s*\\)").containsMatchIn(text)
+    if (text.contains("/km", ignoreCase = true)) return null
+    // OCR can merge "4,96 (163)" and the following "+R$ 5,25 incluído"
+    // into one line. Rating semantics live before the monetary suffix.
+    val ratingText = text.substringBefore("R$", missingDelimiterValue = text)
+    val hasRatingSignal = Regex("(?:★|⭐|\\*|\\bstar\\b|\\b(?:corrida|corridas|viagem|viagens)\\b)", RegexOption.IGNORE_CASE)
+        .containsMatchIn(ratingText) ||
+        Regex("[0-5][,.][0-9]{1,2}\\s*\\(\\s*[+\\d.,]+\\s*\\)").containsMatchIn(ratingText)
     // A bare decimal is also used by route legs (for example, "5 min (1,6 km)").
     if (!hasRatingSignal) return null
-    val match = Regex("(?:★|⭐|\\bstar\\b)\\s*([0-5],[0-9]{1,2})|([0-5],[0-9]{1,2})\\s*(?:★|⭐)|(?<![R$\\d])([0-5],[0-9]{1,2})(?![\\d])").find(text) ?: return null
-    val value = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }?.replace(',', '.')?.toBigDecimalOrNull() ?: return null
+    val match = Regex("(?:★|⭐|\\bstar\\b)\\s*([0-5][,.][0-9]{1,2})|([0-5][,.][0-9]{1,2})\\s*(?:★|⭐)|(?<![R$\\d])([0-5][,.][0-9]{1,2})(?![\\d])").find(ratingText) ?: return null
+    val value = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }
+        ?.replace(',', '.')
+        ?.toBigDecimalOrNull()
+        ?: return null
     return value.movePointRight(2).toLong()
+}
+
+private fun parseRating(lines: List<String>): Long? {
+    lines.firstNotNullOfOrNull(::parseRating)?.let { return it }
+    for (windowSize in 2..3) {
+        lines.windowed(windowSize).firstNotNullOfOrNull { window ->
+            parseRating(window.joinToString(" "))
+        }?.let { return it }
+    }
+    return null
 }
 
 private fun parseStopCount(lines: List<String>): Long? = lines.firstNotNullOfOrNull(::parseStopCount)
@@ -359,8 +455,30 @@ private fun totalDistance(pickup: OfferLeg, trip: OfferLeg): Long? {
     return pickupMeters + tripMeters
 }
 
-private fun parseTripCount(lines: List<String>): Long? = lines.firstNotNullOfOrNull { line ->
-    Regex("(?i)(\\d[\\d.]*)\\s*corridas?").find(line)?.groupValues?.get(1)?.replace(".", "")?.toLongOrNull()
+private fun parseTripCount(lines: List<String>): Long? {
+    lines.firstNotNullOfOrNull { line ->
+        Regex("(?i)(\\d[\\d.]*)\\s*corridas?")
+            .find(line)
+            ?.groupValues
+            ?.get(1)
+            ?.replace(".", "")
+            ?.toLongOrNull()
+            ?: line.takeIf { parseRating(it) != null && !it.contains("+") }
+                ?.let { Regex("\\(\\s*(\\d[\\d.]*)\\s*\\)").find(it) }
+                ?.groupValues
+                ?.get(1)
+                ?.replace(".", "")
+                ?.toLongOrNull()
+    }?.let { return it }
+    return lines.windowed(size = 3, partialWindows = true).firstNotNullOfOrNull { window ->
+        val joined = window.joinToString(" ")
+        joined.takeIf { parseRating(it) != null && !it.contains("+") }
+            ?.let { Regex("\\(\\s*(\\d[\\d.]*)\\s*\\)").find(it) }
+            ?.groupValues
+            ?.get(1)
+            ?.replace(".", "")
+            ?.toLongOrNull()
+    }
 }
 
 private fun findNegotiationAlternatives(lines: List<String>, payout: Money): List<Money> = lines

@@ -7,7 +7,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.net.Uri
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -18,10 +17,14 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import android.content.pm.ServiceInfo
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import br.com.nexo.driver.accessibility.AnalysisSource
+import br.com.nexo.driver.analysis.OfferAnalysisProcessor
+import br.com.nexo.driver.analysis.ActiveOfferUpdateGate
 import br.com.nexo.driver.capture.service.CaptureStopReason
 import br.com.nexo.driver.capture.service.CaptureSessionGuard
 import br.com.nexo.driver.capture.service.CapturedBitmapConsumer
@@ -31,24 +34,12 @@ import br.com.nexo.driver.capture.service.MediaProjectionFrameOrchestrator
 import br.com.nexo.driver.capture.performance.OfferResponseLatencyTracker
 import br.com.nexo.driver.capture.performance.CaptureLatencyDiagnostics
 import br.com.nexo.driver.capture.performance.CaptureLatencyDiagnosticsStore
-import br.com.nexo.driver.destination.SharedPreferencesDriverDestinationStore
-import br.com.nexo.driver.destination.offline.DestinationOfferEnricher
-import br.com.nexo.driver.destination.offline.OfflineAddressPackageTsvCodec
-import br.com.nexo.driver.destination.offline.OfflineAddressResolver
-import br.com.nexo.driver.evaluation.OfferEvaluator
-import br.com.nexo.driver.offer.Confidence
-import br.com.nexo.driver.offer.FieldSource
-import br.com.nexo.driver.offer.NormalizedOffer
-import br.com.nexo.driver.offer.OfferField
-import br.com.nexo.driver.offline.SharedPreferencesOfflineMapPackageStore
 import br.com.nexo.driver.ocr.OcrTextSnapshot
 import br.com.nexo.driver.ocr.OfferOcrPipeline
 import br.com.nexo.driver.ocr.mlkit.DEFAULT_RECOGNITION_TIMEOUT_MILLIS
 import br.com.nexo.driver.ocr.mlkit.MlKitBitmapOcrEngine
-import br.com.nexo.driver.overlay.OfferOverlayPresenter
 import br.com.nexo.driver.overlay.WindowManagerOfferOverlay
-import br.com.nexo.driver.overlay.preferences.SharedPreferencesOverlayPreferenceStore
-import br.com.nexo.driver.profile.SharedPreferencesProfileStore
+import br.com.nexo.driver.speech.OfferDecisionSpeaker
 import br.com.nexo.driver.ui.theme.DriverThemeMode
 import java.util.concurrent.Executors
 
@@ -73,9 +64,9 @@ class OfferCaptureService : Service() {
     private var isForeground = false
     private val sessionGuard = CaptureSessionGuard()
 
-    private val evaluator = OfferEvaluator()
     private val pipeline = OfferOcrPipeline()
-    private val presenter = OfferOverlayPresenter(evaluator)
+    private lateinit var analysisProcessor: OfferAnalysisProcessor
+    private var speaker: OfferDecisionSpeaker? = null
     /** Rolling in-memory diagnostics for the one-second frame-to-overlay target. */
     private val responseLatency = OfferResponseLatencyTracker()
     /**
@@ -88,13 +79,14 @@ class OfferCaptureService : Service() {
     private val postOcrLatency = OfferResponseLatencyTracker(targetMillis = POST_OCR_BUDGET_MILLIS)
     /** Aggregate-only local evidence for checking p95 and worst case during or after a session. */
     private val latencyDiagnostics by lazy { CaptureLatencyDiagnosticsStore.create(this) }
-    /** Loaded once per capture session from the driver-selected local TSV package. */
-    private var destinationOfferEnricher: DestinationOfferEnricher? = null
+    private val activeOfferUpdateGate = ActiveOfferUpdateGate()
 
     override fun onCreate() {
         super.onCreate()
         captureThread.start()
         overlayWindow = WindowManagerOfferOverlay(this)
+        speaker = OfferDecisionSpeaker(this)
+        analysisProcessor = OfferAnalysisProcessor(this, speaker = speaker)
         ocrEngine = MlKitBitmapOcrEngine()
     }
 
@@ -118,7 +110,6 @@ class OfferCaptureService : Service() {
         if (mediaProjection != null || frameOrchestrator != null) return START_NOT_STICKY
         return runCatching {
             startInForeground()
-            destinationOfferEnricher = loadDestinationOfferEnricher()
             startProjection(resultCode, resultData)
         }
             .fold(
@@ -156,6 +147,8 @@ class OfferCaptureService : Service() {
         overlayWindow = null
         runCatching { ocrEngine?.close() }
         ocrEngine = null
+        runCatching { speaker?.close() }
+        speaker = null
         super.onDestroy()
     }
 
@@ -264,15 +257,9 @@ class OfferCaptureService : Service() {
         }
         val parsedOffer = output.offer ?: return
         if (output.isDuplicate) return
-        // The platform-provided direction badge is intentionally discarded. A direction result is
-        // emitted only from the driver's own destination and the selected offline address pack.
-        val offer = destinationOfferEnricher?.enrich(parsedOffer) ?: parsedOffer.withUnknownOfflineDirection()
-        val profile = SharedPreferencesProfileStore.create(this).load().activeProfile
-        val rules = profile?.takeIf { it.isEnabled }?.rules.orEmpty()
-        val result = evaluator.evaluate(offer, rules)
-        val overlayPreferences = SharedPreferencesOverlayPreferenceStore.create(this).load()
-        val overlay = presenter.present(offer, result, overlayPreferences.fields)
-        val appearance = currentOverlayAppearance()
+        val analysis = analysisProcessor.analyze(parsedOffer, AnalysisSource.OCR) ?: return
+        val overlay = analysis.overlay
+        val appearance = analysis.appearance
         val capturedAtMillis = frame.capturedAtNanos / NANOS_PER_MILLISECOND
         mainHandler.post {
             if (!sessionGuard.isActive(session)) return@post
@@ -284,6 +271,7 @@ class OfferCaptureService : Service() {
                 )
             }
                 .onSuccess {
+                    val offerGeneration = activeOfferUpdateGate.open(SystemClock.elapsedRealtime())
                     runCatching { responseLatency.recordOverlayShown(capturedAtMillis) }
                         .onSuccess { snapshot -> publishLatencyDiagnostics(latencyDiagnostics.record(snapshot)) }
                     runCatching { postOcrLatency.recordOverlayShown(ocrCompletedAtMillis) }
@@ -297,6 +285,24 @@ class OfferCaptureService : Service() {
                                 )
                             }
                         }
+                    analysisProcessor.analyzeDestinationUpdateAsync(parsedOffer, AnalysisSource.OCR) { update ->
+                        mainHandler.post {
+                            if (
+                                sessionGuard.isActive(session) &&
+                                activeOfferUpdateGate.accepts(offerGeneration, SystemClock.elapsedRealtime())
+                            ) {
+                                runCatching {
+                                    overlayWindow?.update(
+                                        model = update.overlay,
+                                        themeMode = update.appearance.themeMode,
+                                        fontScale = update.appearance.fontScale,
+                                    )
+                                }.onFailure { failure ->
+                                    Log.w(TAG, "Late destination enrichment could not update overlay.", failure)
+                                }
+                            }
+                        }
+                    }
                 }
         }
     }
@@ -474,44 +480,6 @@ class OfferCaptureService : Service() {
         )
     }
 
-    /**
-     * Opens only the driver-selected document URI, validates its strict TSV schema and keeps the
-     * resolver in memory for this screen-capture session. No offer, OCR block or location history
-     * is written to disk. An unreadable or malformed package leaves direction as unknown.
-     */
-    private fun loadDestinationOfferEnricher(): DestinationOfferEnricher? = runCatching {
-        val destination = SharedPreferencesDriverDestinationStore.create(this).load() ?: return null
-        val selectedPackage = SharedPreferencesOfflineMapPackageStore.create(this).load() ?: return null
-        val bytes = contentResolver.openInputStream(Uri.parse(selectedPackage.contentUri))
-            ?.use(::readBoundedAddressPackage)
-            ?: return null
-        val addressPackage = OfflineAddressPackageTsvCodec.decode(bytes)
-        val resolver = OfflineAddressResolver.create(addressPackage) ?: return null
-        DestinationOfferEnricher(resolver, destination)
-    }.getOrNull()
-
-    private fun readBoundedAddressPackage(input: java.io.InputStream): ByteArray {
-        val output = java.io.ByteArrayOutputStream()
-        val buffer = ByteArray(DEFAULT_ADDRESS_PACKAGE_BUFFER_BYTES)
-        while (true) {
-            val read = input.read(buffer)
-            if (read < 0) break
-            if (output.size() + read > MAX_ADDRESS_PACKAGE_BYTES) {
-                throw IllegalArgumentException("Offline address package is too large.")
-            }
-            output.write(buffer, 0, read)
-        }
-        return output.toByteArray()
-    }
-
-    private fun NormalizedOffer.withUnknownOfflineDirection(): NormalizedOffer {
-        val direction = Confidence<Boolean>(value = null, score = 0f, source = FieldSource.DERIVED)
-        return copy(
-            destinationDirectionHint = direction,
-            fieldConfidence = fieldConfidence + (OfferField.DESTINATION_DIRECTION to direction.score),
-        )
-    }
-
     /** Reads the same private preferences used by the settings screen, without retaining UI state. */
     private fun currentOverlayAppearance(): OverlayAppearance {
         val preferences = getSharedPreferences(APP_SETTINGS_PREFERENCES, Context.MODE_PRIVATE)
@@ -555,10 +523,6 @@ class OfferCaptureService : Service() {
         private const val APP_SETTINGS_PREFERENCES = "driver_inteligente_app_settings"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_FONT_SCALE = "font_scale"
-        private const val DEFAULT_ADDRESS_PACKAGE_BUFFER_BYTES = 16 * 1024
-        // A TSV address index is intentionally bounded: giant render-map files are not parsed by
-        // the offer reader and must never exhaust the foreground service process.
-        private const val MAX_ADDRESS_PACKAGE_BYTES = 16 * 1024 * 1024
 
         fun start(context: Context, resultCode: Int, resultData: Intent) {
             val intent = Intent(context, OfferCaptureService::class.java)

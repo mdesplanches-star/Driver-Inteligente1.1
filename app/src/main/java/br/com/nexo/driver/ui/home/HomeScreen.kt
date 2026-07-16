@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import br.com.nexo.driver.location.CurrentLocationServiceSnapshot
+import br.com.nexo.driver.location.CurrentLocationServiceStatus
 
 data class HomeScreenState(
     val readerEnabled: Boolean = false,
@@ -33,8 +35,9 @@ data class HomeScreenState(
     val activeProfileSummary: String = "R$/km ≥ 1,75 · R$/h ≥ 40",
     val homeDestination: String? = null,
     val homeDestinationDetails: String? = null,
-    val kilometresAnalyzed: Int = 0,
+    val kilometresAnalyzed: Double = 0.0,
     val offersEvaluated: Int = 0,
+    val location: CurrentLocationServiceSnapshot = CurrentLocationServiceSnapshot(),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,6 +47,7 @@ fun HomeScreen(
     onReaderEnabledChanged: (Boolean) -> Unit,
     onOpenFilters: () -> Unit,
     onConfigureHome: () -> Unit,
+    onLocationEnabledChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -62,9 +66,56 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             ReaderCard(state.readerEnabled, onReaderEnabledChanged)
+            CurrentLocationCard(state.location, onLocationEnabledChanged)
             ProfileCard(state.activeProfileName, state.activeProfileSummary, onOpenFilters)
             HomeDestinationCard(state.homeDestination, state.homeDestinationDetails, onConfigureHome)
             TodaySummary(state.kilometresAnalyzed, state.offersEvaluated)
+        }
+    }
+}
+
+@Composable
+private fun CurrentLocationCard(
+    snapshot: CurrentLocationServiceSnapshot,
+    onEnabledChanged: (Boolean) -> Unit,
+) {
+    val enabled = snapshot.status in setOf(
+        CurrentLocationServiceStatus.ACQUIRING,
+        CurrentLocationServiceStatus.ACTIVE,
+        CurrentLocationServiceStatus.FIX_REJECTED,
+        CurrentLocationServiceStatus.MOVEMENT_REJECTED,
+    )
+    val description = when (snapshot.status) {
+        CurrentLocationServiceStatus.IDLE -> "Desligado. Independente da análise de ofertas."
+        CurrentLocationServiceStatus.ACQUIRING -> "Procurando uma localização precisa…"
+        CurrentLocationServiceStatus.ACTIVE -> buildString {
+            append(if (snapshot.isLastKnown) "Última localização conhecida" else "Ativo")
+            snapshot.accuracyMeters?.let { append(" · precisão ${it.toInt()} m") }
+            snapshot.provider?.let { append(" · $it") }
+            snapshot.fixEpochMs?.let { timestamp ->
+                val ageSeconds = ((System.currentTimeMillis() - timestamp).coerceAtLeast(0L) / 1_000L)
+                append(" · há ${ageSeconds}s")
+            }
+        }
+        CurrentLocationServiceStatus.PERMISSION_MISSING -> "Permissão de localização necessária."
+        CurrentLocationServiceStatus.PROVIDER_UNAVAILABLE -> "Ative GPS ou localização do celular."
+        CurrentLocationServiceStatus.FIX_REJECTED -> "Aguardando uma localização mais precisa."
+        CurrentLocationServiceStatus.MOVEMENT_REJECTED -> "Movimento descartado por segurança; tentando novamente."
+    }
+    SectionCard {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text("Localização GPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (snapshot.status != CurrentLocationServiceStatus.IDLE) {
+                    Text(
+                        "Sessão: ${"%.1f".format(java.util.Locale.forLanguageTag("pt-BR"), snapshot.sessionDistanceMeters / 1_000.0)} km",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChanged)
         }
     }
 }
@@ -119,7 +170,7 @@ private fun HomeDestinationCard(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            details ?: "Informe as coordenadas e importe um pacote offline de endereços.",
+            details ?: "Informe o endereço e escolha um raio. O pacote TSV é opcional.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -127,11 +178,11 @@ private fun HomeDestinationCard(
 }
 
 @Composable
-private fun TodaySummary(kilometres: Int, offers: Int) {
+private fun TodaySummary(kilometres: Double, offers: Int) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Hoje", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         SectionCard {
-            MetricRow("km analisados", kilometres.toString())
+            MetricRow("km da sessão", "%.1f".format(java.util.Locale.forLanguageTag("pt-BR"), kilometres))
             HorizontalDivider(modifier = Modifier.padding(vertical = 14.dp))
             MetricRow("ofertas avaliadas", offers.toString())
         }
@@ -162,6 +213,6 @@ private fun SectionCard(onClick: (() -> Unit)? = null, content: @Composable () -
 @Composable
 private fun HomeScreenPreview() {
     MaterialTheme {
-        HomeScreen(HomeScreenState(readerEnabled = true), {}, {}, {})
+        HomeScreen(HomeScreenState(readerEnabled = true), {}, {}, {}, {})
     }
 }

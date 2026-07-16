@@ -9,7 +9,8 @@ import java.util.Base64
 
 /** Internal, versioned codec intentionally based on Kotlin/JDK only (no JSON dependency required). */
 internal object ProfilePayloadCodec {
-    private const val SCHEMA = "driver-profile-v1"
+    private const val SCHEMA = "driver-profile-v2"
+    private const val LEGACY_SCHEMA = "driver-profile-v1"
     private const val PROFILE = "p"
     private const val RULE = "r"
 
@@ -41,7 +42,7 @@ internal object ProfilePayloadCodec {
     fun decode(payload: String?): List<DriverProfile> {
         if (payload.isNullOrBlank()) return emptyList()
         val lines = payload.lineSequence().iterator()
-        if (!lines.hasNext() || lines.next() != SCHEMA) return emptyList()
+        if (!lines.hasNext() || lines.next() !in setOf(LEGACY_SCHEMA, SCHEMA)) return emptyList()
 
         val profiles = linkedMapOf<String, ProfileBuilder>()
         val pendingRules = linkedMapOf<String, MutableList<FilterRule>>()
@@ -87,7 +88,7 @@ internal object ProfilePayloadCodec {
         require(parts.size == 9)
         val target = parts[4].takeIf { it.isNotEmpty() }?.toLong()
         decodeText(parts[1]) to FilterRule(
-            metric = Metric.valueOf(parts[2]),
+            metric = migrateMetric(parts[2]),
             comparator = Comparator.valueOf(parts[3]),
             target = target,
             tolerancePercent = parts[5].toInt(),
@@ -96,6 +97,12 @@ internal object ProfilePayloadCodec {
             enabled = parts[8] == "1",
         )
     }.getOrNull()
+
+    /** The old directional signal was platform-derived; v2 uses the exact home-arrival rule. */
+    private fun migrateMetric(name: String): Metric = when (name) {
+        "IS_TOWARD_DESTINATION" -> Metric.ENDS_NEAR_HOME
+        else -> Metric.valueOf(name)
+    }
 
     private fun encodeText(value: String): String = Base64.getUrlEncoder().withoutPadding()
         .encodeToString(value.toByteArray(UTF_8))

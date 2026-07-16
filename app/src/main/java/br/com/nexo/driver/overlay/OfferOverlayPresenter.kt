@@ -70,7 +70,7 @@ class OfferOverlayPresenter(
                 isAvailable = derived.totalDistance.isUsable(),
             ),
             gridFields = gridFields,
-            isTowardHome = offer.destinationDirectionHint.value == true,
+            isTowardHome = offer.endsNearHome.value == true,
         )
     }
 

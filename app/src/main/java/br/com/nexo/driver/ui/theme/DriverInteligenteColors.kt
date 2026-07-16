@@ -73,10 +73,11 @@ internal val DriverInteligenteDarkColors: ColorScheme = darkColorScheme(
 )
 
 internal val DriverInteligenteLightStatusColors = DriverStatusColors(
-    accept = Color(0xFF167344),
-    onAccept = Color.White,
-    analyze = Color(0xFF9A6500),
-    onAnalyze = Color.White,
+    // Preserves the fast, neon-green recognition used by the approved offer-card direction.
+    accept = Color(0xFF39FF88),
+    onAccept = Color(0xFF07110C),
+    analyze = Color(0xFFFFD43B),
+    onAnalyze = Color(0xFF281E00),
     reject = Color(0xFFBA1A1A),
     onReject = Color.White,
     unknown = Color(0xFF5D645F),

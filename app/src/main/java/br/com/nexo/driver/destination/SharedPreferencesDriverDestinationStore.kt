@@ -12,34 +12,47 @@ import android.content.SharedPreferences
  */
 class SharedPreferencesDriverDestinationStore private constructor(
     private val preferences: SharedPreferences,
-) : DriverDestinationStore {
+) : HomeDestinationStore {
     private val lock = Any()
 
-    override fun load(): DriverDestination? = synchronized(lock) {
-        DestinationPayloadCodec.decode(preferences.getString(KEY_DESTINATION, null))
+    override fun load(): HomeDestination? = synchronized(lock) {
+        val currentPayload = preferences.getString(KEY_DESTINATION_V3, null)
+        DestinationPayloadCodec.decode(currentPayload)?.also { return@synchronized it }
+        val migrated = DestinationPayloadCodec.decode(preferences.getString(KEY_LEGACY_DESTINATION, null))
+        if (migrated != null) {
+            check(
+                preferences.edit()
+                    .putString(KEY_DESTINATION_V3, DestinationPayloadCodec.encode(migrated))
+                    .remove(KEY_LEGACY_DESTINATION)
+                    .commit(),
+            ) { "Could not migrate home destination." }
+        }
+        migrated
     }
 
-    override fun save(destination: DriverDestination): DriverDestination = synchronized(lock) {
+    override fun save(destination: HomeDestination): HomeDestination = synchronized(lock) {
         val validated = requireNotNull(destination.validatedOrNull()) {
             "A destination must have valid coordinates and a non-negative finite arrival radius."
         }
         check(
             preferences.edit()
-                .putString(KEY_DESTINATION, DestinationPayloadCodec.encode(validated))
+                .putString(KEY_DESTINATION_V3, DestinationPayloadCodec.encode(validated))
+                .remove(KEY_LEGACY_DESTINATION)
                 .commit(),
         ) { "Could not persist driver destination." }
         validated
     }
 
     override fun clear() = synchronized(lock) {
-        check(preferences.edit().remove(KEY_DESTINATION).commit()) {
+        check(preferences.edit().remove(KEY_DESTINATION_V3).remove(KEY_LEGACY_DESTINATION).commit()) {
             "Could not clear driver destination."
         }
     }
 
     companion object {
         private const val PREFERENCES_NAME = "driver_destination"
-        private const val KEY_DESTINATION = "destination_v1"
+        private const val KEY_DESTINATION_V3 = "destination_v3"
+        private const val KEY_LEGACY_DESTINATION = "destination_v1"
 
         fun create(context: Context): SharedPreferencesDriverDestinationStore =
             SharedPreferencesDriverDestinationStore(

@@ -23,6 +23,7 @@ enum class Metric {
     HAS_MULTIPLE_STOPS,
     IS_LONG_TRIP,
     IS_TOWARD_DESTINATION,
+    ENDS_NEAR_HOME,
 }
 
 enum class Comparator { AT_LEAST, AT_MOST, IS_TRUE, IS_FALSE }
@@ -152,6 +153,7 @@ class OfferEvaluator(
         Metric.HAS_MULTIPLE_STOPS -> offer.stopCount.map { if (it > 1) 1L else 0L }
         Metric.IS_LONG_TRIP -> offer.longTripHint.map { if (it) 1L else 0L }
         Metric.IS_TOWARD_DESTINATION -> offer.destinationDirectionHint.map { if (it) 1L else 0L }
+        Metric.ENDS_NEAR_HOME -> offer.endsNearHome.map { if (it) 1L else 0L }
     }
 
     private fun numericAtLeast(value: Long, target: Long, tolerance: Int): MetricStatus = when {

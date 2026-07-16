@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -19,13 +21,18 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -35,12 +42,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import br.com.nexo.driver.destination.DriverDestination
 import br.com.nexo.driver.destination.GeoCoordinate
+import br.com.nexo.driver.destination.GeocoderDestinationResolver
+import br.com.nexo.driver.destination.DestinationResolutionStatus
+import br.com.nexo.driver.destination.GoogleMapsOfflineIntent
 import br.com.nexo.driver.destination.offline.OfflineAddressPackageTsvCodec
 import br.com.nexo.driver.offline.OfflineMapPackage
 import br.com.nexo.driver.ui.theme.DriverInteligenteTheme
+import br.com.nexo.driver.R
+import kotlinx.coroutines.delay
 
 /**
  * A deliberately small, offline-first destination setup. Coordinates can be copied from any map
@@ -53,6 +66,7 @@ fun HomeDestinationScreen(
     currentOfflineMapPackage: OfflineMapPackage?,
     onNavigateBack: () -> Unit,
     onSave: (DriverDestination) -> Unit,
+    onDraftChanged: (DriverDestination) -> Unit = {},
     onClear: () -> Unit,
     onOfflineMapImported: (OfflineMapPackage) -> Unit,
     onOfflineMapRemoved: (OfflineMapPackage) -> Unit,
@@ -60,6 +74,10 @@ fun HomeDestinationScreen(
 ) {
     val context = LocalContext.current
     var label by remember(currentDestination) { mutableStateOf(currentDestination?.label.orEmpty()) }
+    var addressInput by remember(currentDestination) {
+        mutableStateOf(currentDestination?.originalAddress ?: currentDestination?.standardizedAddress.orEmpty())
+    }
+    var standardizedAddress by remember(currentDestination) { mutableStateOf(currentDestination?.standardizedAddress) }
     var latitude by remember(currentDestination) {
         mutableStateOf(currentDestination?.coordinate?.latitude?.toInput().orEmpty())
     }
@@ -67,10 +85,31 @@ fun HomeDestinationScreen(
         mutableStateOf(currentDestination?.coordinate?.longitude?.toInput().orEmpty())
     }
     var radius by remember(currentDestination) {
-        mutableStateOf(currentDestination?.arrivalRadiusMeters?.toInput() ?: "150")
+        mutableStateOf(currentDestination?.arrivalRadiusMeters?.toInput() ?: "2000")
     }
+    var resolutionStatus by remember(currentDestination) {
+        mutableStateOf(currentDestination?.resolutionStatus ?: DestinationResolutionStatus.UNAVAILABLE)
+    }
+    var addressEdited by remember(currentDestination) { mutableStateOf(false) }
+    var showAdvanced by remember { mutableStateOf(false) }
+    var resolutionGeneration by remember { mutableIntStateOf(0) }
     var validationError by remember { mutableStateOf<String?>(null) }
     var offlineImportMessage by remember { mutableStateOf<String?>(null) }
+    var geocodeMessage by remember { mutableStateOf<String?>(null) }
+    val geocoder = remember(context) { GeocoderDestinationResolver(context) }
+    LaunchedEffect(addressInput, addressEdited) {
+        if (!addressEdited) return@LaunchedEffect
+        delay(400L)
+        parseDestination(
+            label = label,
+            address = addressInput,
+            standardizedAddress = null,
+            latitudeInput = "",
+            longitudeInput = "",
+            radiusInput = radius,
+            resolutionStatus = DestinationResolutionStatus.FAILED,
+        )?.let(onDraftChanged)
+    }
     val offlineMapLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -88,7 +127,11 @@ fun HomeDestinationScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Destino casa", fontWeight = FontWeight.SemiBold) },
-            navigationIcon = { OutlinedButton(onClick = onNavigateBack) { Text("Voltar") } },
+            navigationIcon = {
+                IconButton(onClick = onNavigateBack) {
+                    Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Voltar")
+                }
+            },
         )
         Column(
             modifier = Modifier
@@ -98,25 +141,75 @@ fun HomeDestinationScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                "Salve um ponto para avaliar se o desembarque aproxima voce de casa.",
+                "Defina a Casa para verificar se o destino final da oferta termina dentro do raio configurado.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Uso offline", fontWeight = FontWeight.SemiBold)
+                    Text("Resolução do endereço", fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Este destino fica somente neste celular. Importe um pacote local de endereços para avaliar as ofertas sem internet.",
+                        "O pacote TSV é consultado primeiro. Se necessário, o Geocoder do Android pode usar os serviços configurados no sistema.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
             }
+            OutlinedTextField(
+                value = addressInput,
+                onValueChange = {
+                    addressInput = it
+                    standardizedAddress = null
+                    latitude = ""
+                    longitude = ""
+                    resolutionStatus = DestinationResolutionStatus.FAILED
+                    addressEdited = true
+                    resolutionGeneration++
+                    geocodeMessage = "Coordenadas anteriores removidas. Resolva novamente ou use a comparação textual."
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Endereço do destino") },
+                placeholder = { Text("Ex.: Rua XV de Novembro, Curitiba") },
+                singleLine = true,
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = GeocoderDestinationResolver.isUseful(addressInput),
+                onClick = {
+                    val requestGeneration = ++resolutionGeneration
+                    geocodeMessage = "Resolvendo endereço..."
+                    geocoder.resolveAsync(addressInput) { resolution ->
+                        Handler(Looper.getMainLooper()).post {
+                            if (requestGeneration != resolutionGeneration) return@post
+                            if (resolution.coordinate != null) {
+                                standardizedAddress = resolution.standardizedAddress
+                                latitude = resolution.coordinate.latitude.toInput()
+                                longitude = resolution.coordinate.longitude.toInput()
+                                resolutionStatus = DestinationResolutionStatus.RESOLVED
+                                addressEdited = false
+                                geocodeMessage = "Endereço resolvido. Confira o raio e salve."
+                            } else {
+                                standardizedAddress = null
+                                latitude = ""
+                                longitude = ""
+                                resolutionStatus = resolution.status
+                                geocodeMessage = "Não foi possível resolver agora. A comparação funcionará somente pelo texto."
+                            }
+                        }
+                    }
+                },
+            ) { Text("Resolver endereço") }
+            Text(
+                "O mapa offline é baixado manualmente no Google Maps. Este app não acessa nem confirma arquivos privados do Google Maps.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            geocodeMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             OfflineMapPackageCard(
                 mapPackage = currentOfflineMapPackage,
                 statusMessage = offlineImportMessage,
-                onImport = { offlineMapLauncher.launch(arrayOf("*/*")) },
+                onImport = { offlineMapLauncher.launch(arrayOf("text/tab-separated-values", "text/plain")) },
                 onRemove = {
                     currentOfflineMapPackage?.let(onOfflineMapRemoved)
                     offlineImportMessage = "Pacote offline removido deste aplicativo."
@@ -130,20 +223,45 @@ fun HomeDestinationScreen(
                 placeholder = { Text("Ex.: Casa") },
                 singleLine = true,
             )
-            NumericField(latitude, { latitude = it; validationError = null }, "Latitude", "Ex.: -25.4284")
-            NumericField(longitude, { longitude = it; validationError = null }, "Longitude", "Ex.: -49.2733")
-            NumericField(radius, { radius = it; validationError = null }, "Raio de chegada (metros)", "150")
+            NumericField(radius, { radius = it; validationError = null }, "Raio da Casa (metros)", "2000")
+            TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                Text(if (showAdvanced) "Ocultar coordenadas avançadas" else "Informar coordenadas manualmente")
+            }
+            if (showAdvanced) {
+                NumericField(latitude, {
+                    latitude = it
+                    resolutionStatus = DestinationResolutionStatus.RESOLVED
+                    validationError = null
+                }, "Latitude", "Ex.: -25,4284")
+                NumericField(longitude, {
+                    longitude = it
+                    resolutionStatus = DestinationResolutionStatus.RESOLVED
+                    validationError = null
+                }, "Longitude", "Ex.: -49,2733")
+            }
             validationError?.let { error ->
                 Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
-                    val parsed = parseDestination(label, latitude, longitude, radius)
-                    if (parsed == null) validationError = "Confira latitude, longitude e o raio de chegada."
+                    val parsed = parseDestination(
+                        label, addressInput, standardizedAddress, latitude, longitude, radius, resolutionStatus,
+                    )
+                    if (parsed == null) validationError = "Informe um endereço específico e um raio entre 200 m e 20 km."
                     else onSave(parsed)
                 },
             ) { Text("Salvar destino") }
+            currentDestination?.coordinate?.let { coordinate ->
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        if (!GoogleMapsOfflineIntent.open(context, coordinate, currentDestination.standardizedAddress ?: currentDestination.label)) {
+                            geocodeMessage = "Nenhum aplicativo de mapas compatível foi encontrado."
+                        }
+                    },
+                ) { Text("Abrir no Google Maps / mapa") }
+            }
             if (currentDestination != null) {
                 OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onClear) { Text("Remover destino") }
             }
@@ -206,18 +324,42 @@ private fun NumericField(value: String, onValueChange: (String) -> Unit, label: 
         modifier = Modifier.fillMaxWidth(),
         label = { Text(label) },
         placeholder = { Text(placeholder) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        // Some decimal keyboards omit the minus sign; text input accepts Brazilian negative
+        // coordinates and comma decimals while validation remains strict on save.
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
         singleLine = true,
     )
 }
 
-private fun parseDestination(label: String, latitudeInput: String, longitudeInput: String, radiusInput: String): DriverDestination? {
-    val latitude = latitudeInput.toDecimalOrNull() ?: return null
-    val longitude = longitudeInput.toDecimalOrNull() ?: return null
+private fun parseDestination(
+    label: String,
+    address: String,
+    standardizedAddress: String?,
+    latitudeInput: String,
+    longitudeInput: String,
+    radiusInput: String,
+    resolutionStatus: DestinationResolutionStatus,
+): DriverDestination? {
     val radius = radiusInput.toDecimalOrNull() ?: return null
-    val coordinate = GeoCoordinate(latitude, longitude)
-    return DriverDestination(coordinate, label, radius)
-        .takeIf { coordinate.isValid && radius.isFinite() && radius >= 0.0 }
+    if (radius !in DriverDestination.MIN_HOME_RADIUS_METERS..DriverDestination.MAX_HOME_RADIUS_METERS) return null
+    val latitude = latitudeInput.toDecimalOrNull()
+    val longitude = longitudeInput.toDecimalOrNull()
+    if ((latitude == null) != (longitude == null)) return null
+    val coordinate = if (latitude != null && longitude != null) GeoCoordinate(latitude, longitude) else null
+    if (coordinate?.isValid == false) return null
+    val original = address.trim().takeIf(String::isNotBlank)
+    if (coordinate == null && !GeocoderDestinationResolver.isUseful(original.orEmpty())) return null
+    val trustedStatus = if (coordinate != null) DestinationResolutionStatus.RESOLVED else resolutionStatus
+    return DriverDestination(
+        coordinate = coordinate,
+        label = label.trim().takeIf(String::isNotBlank),
+        arrivalRadiusMeters = radius,
+        standardizedAddress = standardizedAddress,
+        preparedAtEpochMs = System.currentTimeMillis(),
+        resolutionStatus = trustedStatus,
+        enabled = true,
+        originalAddress = original,
+    )
 }
 
 private fun String.toDecimalOrNull(): Double? = trim().replace(',', '.').toDoubleOrNull()

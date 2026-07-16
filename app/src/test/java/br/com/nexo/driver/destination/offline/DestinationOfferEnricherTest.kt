@@ -30,58 +30,82 @@ class DestinationOfferEnricherTest {
                 metadata = OfflineAddressPackageMetadata("Curitiba", "1.0.0", "Curitiba"),
                 places = listOf(
                     place("pickup", "Rua de Coleta, 1", cityCenter),
-                    place("towards", "Rua Rumo a Casa, 2", GeoCoordinate(-25.3934, -49.2733)),
-                    place("away", "Rua no Sentido Oposto, 3", GeoCoordinate(-25.4684, -49.2733)),
+                    place("home", "Rua ao Lado de Casa, 2", GeoCoordinate(-25.3785, -49.2733)),
+                    place("away", "Rua Longe de Casa, 3", GeoCoordinate(-25.4684, -49.2733)),
                 ),
             ),
         ),
     )
-    private val destination = DriverDestination(homeNorth)
+    private val destination = DriverDestination(homeNorth, arrivalRadiusMeters = 200.0)
 
     @Test
-    fun `replaces Uber direction hint with an exact offline result`() {
+    fun `derives true only when dropoff is inside configured home radius`() {
         val enriched = DestinationOfferEnricher(resolver, destination).enrich(
-            offer(pickupAddress = "Rua de Coleta, 1", dropoffAddress = "Rua Rumo a Casa, 2", uberHint = false),
+            offer(pickupAddress = "Rua de Coleta, 1", dropoffAddress = "Rua ao Lado de Casa, 2", uberHint = false),
         )
 
-        assertEquals(true, enriched.destinationDirectionHint.value)
-        assertEquals(1f, enriched.destinationDirectionHint.score)
-        assertEquals(FieldSource.DERIVED, enriched.destinationDirectionHint.source)
-        assertEquals(1f, enriched.fieldConfidence[OfferField.DESTINATION_DIRECTION])
-    }
-
-    @Test
-    fun `derives false for a resolved trip that moves away from home`() {
-        val enriched = DestinationOfferEnricher(resolver, destination).enrich(
-            offer(pickupAddress = "Rua de Coleta, 1", dropoffAddress = "Rua no Sentido Oposto, 3", uberHint = true),
-        )
-
+        assertEquals(true, enriched.endsNearHome.value)
+        assertEquals(1f, enriched.endsNearHome.score)
+        assertEquals(FieldSource.DERIVED, enriched.endsNearHome.source)
+        assertEquals(1f, enriched.fieldConfidence[OfferField.ENDS_NEAR_HOME])
+        // The platform signal remains informative; it is not overwritten by the home rule.
         assertEquals(false, enriched.destinationDirectionHint.value)
-        assertTrue(enriched.destinationDirectionHint.score >= 0.9f)
-        assertEquals(FieldSource.DERIVED, enriched.destinationDirectionHint.source)
+        assertEquals(FieldSource.OCR, enriched.destinationDirectionHint.source)
     }
 
     @Test
-    fun `clears rather than trusts an Uber hint when either endpoint cannot resolve`() {
+    fun `derives false for an exact dropoff outside home radius without looking at pickup`() {
         val enriched = DestinationOfferEnricher(resolver, destination).enrich(
-            offer(pickupAddress = "Rua de Coleta, 1", dropoffAddress = "Endere\u00e7o fora do pacote", uberHint = true),
+            offer(pickupAddress = "Endereço fora do pacote", dropoffAddress = "Rua Longe de Casa, 3", uberHint = true),
         )
 
-        assertNull(enriched.destinationDirectionHint.value)
-        assertEquals(0f, enriched.destinationDirectionHint.score)
-        assertEquals(FieldSource.DERIVED, enriched.destinationDirectionHint.source)
-        assertEquals(0f, enriched.fieldConfidence[OfferField.DESTINATION_DIRECTION])
+        assertEquals(false, enriched.endsNearHome.value)
+        assertEquals(1f, enriched.endsNearHome.score)
+        assertEquals(true, enriched.destinationDirectionHint.value)
     }
 
     @Test
-    fun `clears platform hint when no driver destination is configured`() {
-        val enriched = DestinationOfferEnricher(resolver, driverDestination = null).enrich(
-            offer(pickupAddress = "Rua de Coleta, 1", dropoffAddress = "Rua Rumo a Casa, 2", uberHint = true),
+    fun `returns unknown when dropoff cannot resolve even if pickup is known`() {
+        val enriched = DestinationOfferEnricher(resolver, destination).enrich(
+            offer(pickupAddress = "Rua de Coleta, 1", dropoffAddress = "Endereço fora do pacote", uberHint = true),
         )
 
-        assertNull(enriched.destinationDirectionHint.value)
-        assertFalse(enriched.destinationDirectionHint.score > 0f)
-        assertEquals(FieldSource.DERIVED, enriched.destinationDirectionHint.source)
+        assertNull(enriched.endsNearHome.value)
+        assertEquals(0f, enriched.endsNearHome.score)
+        assertEquals(FieldSource.DERIVED, enriched.endsNearHome.source)
+        assertEquals(0f, enriched.fieldConfidence[OfferField.ENDS_NEAR_HOME])
+        assertTrue(enriched.destinationDirectionHint.value == true)
+    }
+
+    @Test
+    fun `returns unknown when home is not configured`() {
+        val enriched = DestinationOfferEnricher(resolver, driverDestination = null).enrich(
+            offer(pickupAddress = "Rua de Coleta, 1", dropoffAddress = "Rua ao Lado de Casa, 2", uberHint = true),
+        )
+
+        assertNull(enriched.endsNearHome.value)
+        assertFalse(enriched.endsNearHome.score > 0f)
+        assertEquals(true, enriched.destinationDirectionHint.value)
+    }
+
+    @Test
+    fun `matches an exact dropoff address without an imported TSV package`() {
+        val home = DriverDestination(
+            coordinate = null,
+            originalAddress = "Rua ao Lado de Casa, 2",
+            resolutionStatus = br.com.nexo.driver.destination.DestinationResolutionStatus.UNAVAILABLE,
+            enabled = true,
+        )
+        val enriched = DestinationOfferEnricher(addressResolver = null, driverDestination = home).enrich(
+            offer(
+                pickupAddress = "Qualquer coleta, 1",
+                dropoffAddress = "Rua ao Lado de Casa, 2",
+                uberHint = false,
+            ),
+        )
+
+        assertEquals(true, enriched.endsNearHome.value)
+        assertEquals(FieldSource.DERIVED, enriched.endsNearHome.source)
     }
 
     private fun place(id: String, label: String, coordinate: GeoCoordinate) = OfflineAddressPlace(

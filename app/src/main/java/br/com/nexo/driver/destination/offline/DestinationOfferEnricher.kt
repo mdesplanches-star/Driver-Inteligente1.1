@@ -1,9 +1,10 @@
 package br.com.nexo.driver.destination.offline
 
-import br.com.nexo.driver.destination.DestinationDirectionEvaluator
-import br.com.nexo.driver.destination.DestinationDirectionStatus
-import br.com.nexo.driver.destination.DirectionEvaluationInput
 import br.com.nexo.driver.destination.DriverDestination
+import br.com.nexo.driver.destination.GeoCoordinate
+import br.com.nexo.driver.destination.HomeMatchStatus
+import br.com.nexo.driver.destination.HomeMatcher
+import br.com.nexo.driver.destination.OfferDestination
 import br.com.nexo.driver.offer.Confidence
 import br.com.nexo.driver.offer.FieldSource
 import br.com.nexo.driver.offer.GeoText
@@ -11,62 +12,72 @@ import br.com.nexo.driver.offer.NormalizedOffer
 import br.com.nexo.driver.offer.OfferField
 
 /**
- * Replaces an offer's platform-provided direction hint with a deterministic, offline result.
+ * Adds a deterministic offline home-arrival result to an offer.
  *
  * A platform badge such as Uber's "em dire\u00e7\u00e3o ao seu destino" is deliberately never used here:
- * the app's destination is independent from the platform destination quota. A Boolean is emitted
- * only when both offer endpoints are exact, unambiguous matches in the active offline package.
+ * the app's destination is independent from the platform destination quota. The platform's
+ * [NormalizedOffer.destinationDirectionHint] is retained as informative data; it never drives
+ * the `ends near home` filter. A Boolean is emitted only from an exact, unambiguous drop-off
+ * match in the active offline package. Pickup and device GPS are deliberately never consulted.
  */
 class DestinationOfferEnricher(
-    private val addressResolver: OfflineAddressResolver,
+    private val addressResolver: OfflineAddressResolver?,
     private val driverDestination: DriverDestination?,
-    private val evaluator: DestinationDirectionEvaluator = DestinationDirectionEvaluator(),
+    private val matcher: HomeMatcher = HomeMatcher(),
 ) {
     fun enrich(offer: NormalizedOffer): NormalizedOffer {
-        val pickup = offer.pickup.location.resolvePlace()
-        val dropoff = offer.trip.location.resolvePlace()
-        val result = if (pickup != null && dropoff != null && driverDestination != null) {
-            evaluator.evaluate(
-                DirectionEvaluationInput(
-                    currentPosition = null,
-                    pickupPosition = pickup.coordinate,
-                    dropoffPosition = dropoff.coordinate,
-                    destination = driverDestination,
-                ),
-            )
-        } else {
-            null
+        val match = matcher.match(driverDestination, offer.trip.location.resolveOfferDestination())
+        val endsNearHome = when (match.status) {
+            HomeMatchStatus.ENDS_NEAR_HOME -> knownHomeMatch(true)
+            HomeMatchStatus.ENDS_AWAY_FROM_HOME -> knownHomeMatch(false)
+            HomeMatchStatus.UNKNOWN -> unknownHomeMatch()
         }
 
-        val directionHint = result
-            ?.takeUnless { it.status == DestinationDirectionStatus.UNKNOWN }
-            ?.let {
-                Confidence(
-                    value = it.isTowardsDestination,
-                    score = DERIVED_DIRECTION_CONFIDENCE,
-                    source = FieldSource.DERIVED,
-                )
-            }
-            ?: unknownDirection()
-
         return offer.copy(
-            destinationDirectionHint = directionHint,
+            endsNearHome = endsNearHome,
             fieldConfidence = offer.fieldConfidence +
-                (OfferField.DESTINATION_DIRECTION to directionHint.score),
+                (OfferField.ENDS_NEAR_HOME to endsNearHome.score),
         )
     }
 
-    private fun Confidence<GeoText>.resolvePlace(): OfflineAddressPlace? =
-        value?.address?.let(addressResolver::resolve)?.place
+    private fun Confidence<GeoText>.resolveOfferDestination(): OfferDestination? = value?.let { text ->
+        text.coordinate?.takeIf(GeoCoordinate::isValid)?.let { coordinate ->
+            OfferDestination(
+                coordinate = coordinate,
+                originalAddress = text.address,
+                standardizedAddress = text.address,
+                resolutionStatus = br.com.nexo.driver.destination.DestinationResolutionStatus.RESOLVED,
+            )
+        } ?: text.address?.let { address ->
+            addressResolver?.resolve(address)?.place?.let { place ->
+                OfferDestination(
+                    coordinate = place.coordinate,
+                    originalAddress = address,
+                    standardizedAddress = place.label,
+                    resolutionStatus = br.com.nexo.driver.destination.DestinationResolutionStatus.RESOLVED,
+                )
+            } ?: OfferDestination(
+                originalAddress = address,
+                standardizedAddress = address,
+                resolutionStatus = br.com.nexo.driver.destination.DestinationResolutionStatus.UNAVAILABLE,
+            )
+        }
+    }
 
-    private fun unknownDirection() = Confidence<Boolean>(
+    private fun unknownHomeMatch() = Confidence<Boolean>(
         value = null,
         score = 0f,
         source = FieldSource.DERIVED,
     )
 
+    private fun knownHomeMatch(value: Boolean) = Confidence(
+        value = value,
+        score = DERIVED_HOME_MATCH_CONFIDENCE,
+        source = FieldSource.DERIVED,
+    )
+
     private companion object {
         // Exact package lookup plus deterministic geometry makes this a high-confidence result.
-        const val DERIVED_DIRECTION_CONFIDENCE = 1f
+        const val DERIVED_HOME_MATCH_CONFIDENCE = 1f
     }
 }

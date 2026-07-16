@@ -16,6 +16,7 @@ enum class OfferField {
     STOP_COUNT,
     LONG_TRIP,
     DESTINATION_DIRECTION,
+    ENDS_NEAR_HOME,
 }
 
 data class Confidence<T>(
@@ -51,7 +52,12 @@ value class Duration(val seconds: Long) {
     }
 }
 
-data class GeoText(val address: String?, val locality: String?)
+data class GeoText(
+    val address: String?,
+    val locality: String?,
+    /** Filled by the optional asynchronous Geocoder enrichment; never contains map tiles. */
+    val coordinate: br.com.nexo.driver.destination.GeoCoordinate? = null,
+)
 
 data class OfferLeg(
     val duration: Confidence<Duration>,
@@ -87,6 +93,9 @@ data class NormalizedOffer(
     val serviceType: Confidence<String>,
     val stopCount: Confidence<Long>,
     val longTripHint: Confidence<Boolean>,
+    /** Exact offline match of the offered drop-off to the driver's selected home radius. */
+    val endsNearHome: Confidence<Boolean> = Confidence(null, 0f, FieldSource.DERIVED),
+    /** Informative platform/direction signal. It is intentionally distinct from [endsNearHome]. */
     val destinationDirectionHint: Confidence<Boolean>,
     val rawLayoutVersion: String,
     val fieldConfidence: Map<OfferField, Float>,

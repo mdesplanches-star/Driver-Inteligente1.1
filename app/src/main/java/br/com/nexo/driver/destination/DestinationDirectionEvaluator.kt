@@ -17,14 +17,39 @@ data class GeoCoordinate(
 }
 
 /**
- * A destination selected by the driver. The coordinates come from an offline geocoder/map;
- * this module never calls a map or a network API.
+ * The driver's selected home destination. The coordinates come from an offline geocoder/map;
+ * this module never calls a map, a network API, or the device GPS.
  */
-data class DriverDestination(
-    val coordinate: GeoCoordinate,
+data class HomeDestination(
+    val coordinate: GeoCoordinate? = null,
     val label: String? = null,
-    val arrivalRadiusMeters: Double = 150.0,
-)
+    val arrivalRadiusMeters: Double = DEFAULT_HOME_RADIUS_METERS,
+    val standardizedAddress: String? = null,
+    val preparedAtEpochMs: Long? = null,
+    val resolutionStatus: DestinationResolutionStatus = DestinationResolutionStatus.RESOLVED,
+    /** A disabled destination is retained for editing but must never influence a decision. */
+    val enabled: Boolean = coordinate != null,
+    /** Exact text supplied by the driver, preserved independently from a geocoder's normalization. */
+    val originalAddress: String? = null,
+) {
+    val hasTrustedCoordinate: Boolean
+        get() = enabled && resolutionStatus == DestinationResolutionStatus.RESOLVED && coordinate?.isValid == true
+
+    companion object {
+        const val MIN_HOME_RADIUS_METERS = 200.0
+        const val DEFAULT_HOME_RADIUS_METERS = 2_000.0
+        const val MAX_HOME_RADIUS_METERS = 20_000.0
+    }
+}
+
+/** Source-compatible name used by the first destination-home implementation. */
+typealias DriverDestination = HomeDestination
+
+enum class DestinationResolutionStatus {
+    RESOLVED,
+    FAILED,
+    UNAVAILABLE,
+}
 
 /**
  * Coordinates available for an offered trip. The pickup is preferred as the trip origin because
@@ -107,14 +132,15 @@ class DestinationDirectionEvaluator(
             else -> return unknown()
         }
 
-        if (!destination.coordinate.isValid || !dropoff.isValid ||
+        val destinationCoordinate = destination.coordinate
+        if (!destination.hasTrustedCoordinate || destinationCoordinate == null || !dropoff.isValid ||
             destination.arrivalRadiusMeters < 0.0 || !destination.arrivalRadiusMeters.isFinite()
         ) {
             return unknown()
         }
 
-        val start = distanceMeters(origin.second!!, destination.coordinate)
-        val end = distanceMeters(dropoff, destination.coordinate)
+        val start = distanceMeters(origin.second!!, destinationCoordinate)
+        val end = distanceMeters(dropoff, destinationCoordinate)
         val reduction = start - end
         val ratio = if (start == 0.0) 0.0 else reduction / start
 

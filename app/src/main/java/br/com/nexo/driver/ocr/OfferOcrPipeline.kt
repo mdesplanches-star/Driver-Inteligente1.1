@@ -2,6 +2,7 @@ package br.com.nexo.driver.ocr
 
 import br.com.nexo.driver.offer.NormalizedOffer
 import br.com.nexo.driver.offer.OfferSource
+import br.com.nexo.driver.offer.FieldSource
 import br.com.nexo.driver.parser.OfferParserRegistry
 import br.com.nexo.driver.parser.RawOfferText
 
@@ -24,6 +25,7 @@ data class OcrTextSnapshot(
     val blocks: List<OcrTextBlock>,
     val capturedAtEpochMs: Long,
     val layoutHint: String? = null,
+    val fieldSource: FieldSource = FieldSource.OCR,
 )
 
 /**
@@ -124,6 +126,7 @@ fun OcrTextSnapshot.toRawOfferText(): RawOfferText = RawOfferText(
         .joinToString(separator = "\n"),
     capturedAtEpochMs = capturedAtEpochMs,
     layoutHint = layoutHint,
+    fieldSource = fieldSource,
 )
 
 /**

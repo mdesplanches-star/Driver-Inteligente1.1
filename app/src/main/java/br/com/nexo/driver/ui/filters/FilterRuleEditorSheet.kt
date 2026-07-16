@@ -298,7 +298,12 @@ private fun RuleNumberSlider(
 }
 
 private val Metric.isNumeric: Boolean
-    get() = this !in setOf(Metric.HAS_MULTIPLE_STOPS, Metric.IS_LONG_TRIP, Metric.IS_TOWARD_DESTINATION)
+    get() = this !in setOf(
+        Metric.HAS_MULTIPLE_STOPS,
+        Metric.IS_LONG_TRIP,
+        Metric.IS_TOWARD_DESTINATION,
+        Metric.ENDS_NEAR_HOME,
+    )
 
 private val Metric.editorTitle: String
     get() = when (this) {
@@ -315,6 +320,7 @@ private val Metric.editorTitle: String
         Metric.HAS_MULTIPLE_STOPS -> "Múltiplas paradas"
         Metric.IS_LONG_TRIP -> "Viagem longa"
         Metric.IS_TOWARD_DESTINATION -> "Em direção à casa"
+        Metric.ENDS_NEAR_HOME -> "Destino próximo de casa"
     }
 
 private val Metric.targetLabel: String
@@ -350,6 +356,7 @@ private val Metric.booleanTrueLabel: String
         Metric.HAS_MULTIPLE_STOPS -> "Possui"
         Metric.IS_LONG_TRIP -> "É longa"
         Metric.IS_TOWARD_DESTINATION -> "Vai para casa"
+        Metric.ENDS_NEAR_HOME -> "Termina perto"
         else -> "Sim"
     }
 
@@ -358,6 +365,7 @@ private val Metric.booleanFalseLabel: String
         Metric.HAS_MULTIPLE_STOPS -> "Não possui"
         Metric.IS_LONG_TRIP -> "Não é longa"
         Metric.IS_TOWARD_DESTINATION -> "Não vai"
+        Metric.ENDS_NEAR_HOME -> "Não termina perto"
         else -> "Não"
     }
 

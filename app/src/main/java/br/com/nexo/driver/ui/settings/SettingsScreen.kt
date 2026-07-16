@@ -15,9 +15,12 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -30,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import br.com.nexo.driver.overlay.preferences.OverlayMetricField
 import br.com.nexo.driver.overlay.preferences.OverlayPreferences
 import br.com.nexo.driver.overlay.preferences.OverlaySlot
+import br.com.nexo.driver.overlay.OverlayPosition
 import br.com.nexo.driver.ui.theme.DriverInteligenteTheme
 import br.com.nexo.driver.ui.theme.DriverThemeMode
 
@@ -45,6 +49,10 @@ fun SettingsScreen(
     onThemeModeChanged: (DriverThemeMode) -> Unit,
     onFontScaleChanged: (AppFontScale) -> Unit,
     onOverlayPreferencesChanged: (OverlayPreferences) -> Unit = {},
+    onOverlayPositionChanged: (OverlayPosition) -> Unit = {},
+    onOpenAccessibilitySettings: () -> Unit = {},
+    onSpeakDecisionChanged: (Boolean) -> Unit = {},
+    onTestGalleryImage: () -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(title = { Text("Ajustes", fontWeight = FontWeight.SemiBold) })
@@ -85,7 +93,65 @@ fun SettingsScreen(
                 )
             }
 
+            PreferenceCard(title = "Posição do overlay", description = "Define onde o card aparece sobre o app de corrida.") {
+                ChoiceGroup(
+                    options = OverlayPosition.entries,
+                    selected = state.overlayPosition,
+                    label = OverlayPosition::label,
+                    onSelected = onOverlayPositionChanged,
+                )
+            }
+
             FontPreview(fontScale = state.fontScale)
+
+            Text(
+                text = "Leitura e voz",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "A acessibilidade lê os cards quando o app da corrida expõe texto. O OCR por tela continua como fallback.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            PreferenceCard(
+                title = "Serviço de acessibilidade",
+                description = if (state.accessibilityServiceEnabled) {
+                    "Ativo: leitura principal por acessibilidade habilitada."
+                } else {
+                    "Inativo: toque para abrir as configurações do Android e ativar manualmente."
+                },
+            ) {
+                Button(modifier = Modifier.fillMaxWidth(), onClick = onOpenAccessibilitySettings) {
+                    Text(if (state.accessibilityServiceEnabled) "Abrir acessibilidade" else "Ativar acessibilidade")
+                }
+            }
+            PreferenceCard(
+                title = "Testar imagem da galeria",
+                description = "Escolha uma captura da Uber ou 99. A imagem passa pelo mesmo OCR, filtros e overlay, sem ser salva pelo app.",
+            ) {
+                Button(modifier = Modifier.fillMaxWidth(), onClick = onTestGalleryImage) {
+                    Text("Selecionar captura")
+                }
+                state.galleryTestStatus?.let { status ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            PreferenceCard(
+                title = "Falar decisão da corrida",
+                description = "Fala uma vez por oferta nova: aceitar, analisar ou recusar, junto com o valor.",
+            ) {
+                ToggleRow(
+                    label = if (state.speakDecision) "Fala ligada" else "Fala desligada",
+                    checked = state.speakDecision,
+                    onCheckedChange = onSpeakDecisionChanged,
+                )
+            }
 
             Text(
                 text = "Campos do overlay",
@@ -102,6 +168,22 @@ fun SettingsScreen(
                 onPreferencesChanged = onOverlayPreferencesChanged,
             )
         }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -140,7 +222,7 @@ private fun PreferenceCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -167,7 +249,7 @@ private fun <T> ChoiceGroup(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(44.dp)
                     .selectable(
                         selected = option == selected,
                         role = Role.RadioButton,

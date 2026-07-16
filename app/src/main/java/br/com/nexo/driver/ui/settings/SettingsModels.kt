@@ -4,6 +4,7 @@ import br.com.nexo.driver.ui.theme.DriverThemeMode
 import br.com.nexo.driver.overlay.preferences.OverlayPreferences
 import br.com.nexo.driver.overlay.preferences.OverlaySlot
 import br.com.nexo.driver.overlay.preferences.OverlayMetricField
+import br.com.nexo.driver.overlay.OverlayPosition
 
 /**
  * Preferences exposed by the first version of the settings screen.
@@ -15,6 +16,10 @@ data class SettingsScreenState(
     val themeMode: DriverThemeMode = DriverThemeMode.SYSTEM,
     val fontScale: AppFontScale = AppFontScale.DEFAULT,
     val overlayPreferences: OverlayPreferences = OverlayPreferences.DEFAULT,
+    val accessibilityServiceEnabled: Boolean = false,
+    val speakDecision: Boolean = true,
+    val galleryTestStatus: String? = null,
+    val overlayPosition: OverlayPosition = OverlayPosition.BOTTOM,
 )
 
 enum class AppFontScale(

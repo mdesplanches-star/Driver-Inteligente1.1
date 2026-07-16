@@ -2,6 +2,7 @@ package br.com.nexo.driver.ui
 
 import android.Manifest
 import android.app.Activity
+import android.content.ComponentName
 import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
@@ -11,11 +12,15 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import android.text.TextUtils
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,8 +30,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import br.com.nexo.driver.capture.OfferCaptureService
+import br.com.nexo.driver.analysis.OfferSessionMetricsRepository
 import br.com.nexo.driver.destination.DriverDestination
 import br.com.nexo.driver.destination.SharedPreferencesDriverDestinationStore
 import androidx.compose.ui.Modifier
@@ -37,6 +47,7 @@ import br.com.nexo.driver.evaluation.Metric
 import br.com.nexo.driver.profile.DriverProfile
 import br.com.nexo.driver.profile.SharedPreferencesProfileStore
 import br.com.nexo.driver.overlay.preferences.SharedPreferencesOverlayPreferenceStore
+import br.com.nexo.driver.overlay.preferences.SharedPreferencesOverlayPositionStore
 import br.com.nexo.driver.offline.SharedPreferencesOfflineMapPackageStore
 import br.com.nexo.driver.permission.CaptureSessionId
 import br.com.nexo.driver.permission.PermissionGrant
@@ -46,6 +57,7 @@ import br.com.nexo.driver.permission.PermissionStateReducer
 import br.com.nexo.driver.ui.filters.FiltersScreen
 import br.com.nexo.driver.ui.filters.FiltersScreenState
 import br.com.nexo.driver.ui.filters.FilterRuleEditorSheet
+import br.com.nexo.driver.ui.filters.FilterPickerSheet
 import br.com.nexo.driver.ui.filters.FilterRuleId
 import br.com.nexo.driver.ui.filters.id
 import br.com.nexo.driver.ui.destination.HomeDestinationScreen
@@ -56,8 +68,16 @@ import br.com.nexo.driver.ui.permission.PermissionOnboardingSheet
 import br.com.nexo.driver.ui.settings.AppFontScale
 import br.com.nexo.driver.ui.settings.SettingsScreen
 import br.com.nexo.driver.ui.settings.SettingsScreenState
+import br.com.nexo.driver.speech.SharedPreferencesSpeechSettingsStore
+import br.com.nexo.driver.speech.SpeechSettings
 import br.com.nexo.driver.ui.theme.DriverInteligenteTheme
 import br.com.nexo.driver.ui.theme.DriverThemeMode
+import br.com.nexo.driver.accessibility.DriverAccessibilityService
+import br.com.nexo.driver.gallery.GalleryOfferTester
+import br.com.nexo.driver.gallery.message
+import br.com.nexo.driver.R
+import br.com.nexo.driver.location.CurrentLocationService
+import br.com.nexo.driver.location.CurrentLocationStateRepository
 import java.util.UUID
 
 private enum class AppDestination(
@@ -81,6 +101,30 @@ fun NexoApp() {
     }
     var overlayPreferences by remember(overlayPreferencesStore) {
         mutableStateOf(overlayPreferencesStore.load())
+    }
+    val overlayPositionStore = remember(context) { SharedPreferencesOverlayPositionStore.create(context) }
+    var overlayPosition by remember(overlayPositionStore) { mutableStateOf(overlayPositionStore.load()) }
+    val speechSettingsStore = remember(context) { SharedPreferencesSpeechSettingsStore.create(context) }
+    var speechSettings by remember(speechSettingsStore) {
+        mutableStateOf(speechSettingsStore.load())
+    }
+    var accessibilityServiceEnabled by remember(context) {
+        mutableStateOf(context.isDriverAccessibilityServiceEnabled())
+    }
+    val galleryOfferTester = remember(context) { GalleryOfferTester(context) }
+    var galleryTestStatus by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(galleryOfferTester) {
+        onDispose { galleryOfferTester.close() }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                accessibilityServiceEnabled = context.isDriverAccessibilityServiceEnabled()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     var themeMode by remember(appPreferences) {
         mutableStateOf(appPreferences.readThemeMode())
@@ -110,13 +154,38 @@ fun NexoApp() {
     val activeProfile = requireNotNull(profileSnapshot.activeProfile)
     var destination by remember { mutableStateOf(AppDestination.HOME) }
     var editingRuleId by remember { mutableStateOf<FilterRuleId?>(null) }
+    var showFilterPicker by remember { mutableStateOf(false) }
     var readerEnabled by remember { mutableStateOf(OfferCaptureService.isActive(context)) }
+    var locationSnapshot by remember { mutableStateOf(CurrentLocationStateRepository.current()) }
+    var sessionMetrics by remember { mutableStateOf(OfferSessionMetricsRepository.current()) }
     var showPermissionOnboarding by remember { mutableStateOf(false) }
     var captureSessionId by remember { mutableStateOf(newCaptureSessionId()) }
     val permissionReducer = remember { PermissionStateReducer() }
     val readinessEvaluator = remember { PermissionReadinessEvaluator() }
     var permissionState by remember { mutableStateOf(initialPermissionState(context)) }
+    var pendingLocationStart by remember { mutableStateOf(false) }
     val readiness = readinessEvaluator.evaluate(permissionState, captureSessionId)
+
+    DisposableEffect(Unit) {
+        val locationSubscription = CurrentLocationStateRepository.subscribe { snapshot -> locationSnapshot = snapshot }
+        val offerSubscription = OfferSessionMetricsRepository.subscribe { metrics -> sessionMetrics = metrics }
+        onDispose {
+            locationSubscription.close()
+            offerSubscription.close()
+        }
+    }
+
+    BackHandler(
+        enabled = editingRuleId != null || showFilterPicker || showPermissionOnboarding ||
+            destination == AppDestination.FILTERS || destination == AppDestination.HOME_DESTINATION,
+    ) {
+        when {
+            editingRuleId != null -> editingRuleId = null
+            showFilterPicker -> showFilterPicker = false
+            showPermissionOnboarding -> showPermissionOnboarding = false
+            else -> destination = AppDestination.HOME
+        }
+    }
 
     // The service is the source of truth: projection can be stopped by Android at any time (for
     // example from the system privacy controls), without a tap in this Activity.
@@ -158,6 +227,31 @@ fun NexoApp() {
             permissionState,
             if (granted) PermissionGrant.GRANTED else PermissionGrant.DENIED,
         )
+        if (pendingLocationStart) {
+            pendingLocationStart = false
+            if (granted) {
+                CurrentLocationService.start(context)
+            } else {
+                CurrentLocationStateRepository.update(CurrentLocationState.PermissionMissing)
+            }
+        }
+    }
+    val locationPermissionsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingLocationStart = true
+                notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                CurrentLocationService.start(context)
+            }
+        }
     }
     val mediaProjectionManager = remember(context) {
         context.getSystemService(MediaProjectionManager::class.java)
@@ -178,6 +272,18 @@ fun NexoApp() {
             readerEnabled = false
         }
     }
+    val galleryImageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) {
+            galleryTestStatus = "Nenhuma imagem selecionada."
+        } else {
+            galleryTestStatus = "Lendo imagem e calculando oferta…"
+            galleryOfferTester.test(uri) { result ->
+                galleryTestStatus = result.message()
+            }
+        }
+    }
 
     fun updateActiveProfile(transform: (DriverProfile) -> DriverProfile) {
         profileSnapshot = profileStore.save(transform(activeProfile))
@@ -192,6 +298,9 @@ fun NexoApp() {
                 onSave = { selected ->
                     homeDestination = homeDestinationStore.save(selected)
                     destination = AppDestination.HOME
+                },
+                onDraftChanged = { draft ->
+                    homeDestination = homeDestinationStore.save(draft)
                 },
                 onClear = {
                     homeDestinationStore.clear()
@@ -238,12 +347,10 @@ fun NexoApp() {
                 },
                 onRuleClick = { ruleId -> editingRuleId = ruleId },
                 onAddFilter = {
-                    updateActiveProfile { profile ->
-                        profile.updated(
-                            rules = addNextRule(profile.rules),
-                            updatedAtEpochMs = System.currentTimeMillis(),
-                        )
-                    }
+                    showFilterPicker = true
+                },
+                bottomBar = {
+                    DriverBottomBar(selected = AppDestination.FILTERS, onSelected = { destination = it })
                 },
             )
 
@@ -263,6 +370,9 @@ fun NexoApp() {
                                 .joinToString(" · ") { it.metric.shortLabel() },
                             homeDestination = homeDestination?.displayName(),
                             homeDestinationDetails = homeDestination?.displayDetails(),
+                            kilometresAnalyzed = locationSnapshot.sessionDistanceMeters / 1_000.0,
+                            offersEvaluated = sessionMetrics.offersEvaluated,
+                            location = locationSnapshot,
                         ),
                         onReaderEnabledChanged = { enabled ->
                             if (!enabled) {
@@ -278,6 +388,41 @@ fun NexoApp() {
                         },
                         onOpenFilters = { destination = AppDestination.FILTERS },
                         onConfigureHome = { destination = AppDestination.HOME_DESTINATION },
+                        onLocationEnabledChanged = { enabled ->
+                            if (!enabled) {
+                                CurrentLocationService.stop(context)
+                            } else {
+                                val fineGranted = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                ) == PackageManager.PERMISSION_GRANTED
+                                val coarseGranted = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (fineGranted || coarseGranted) {
+                                    if (
+                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                        ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        ) != PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        pendingLocationStart = true
+                                        notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    } else {
+                                        CurrentLocationService.start(context)
+                                    }
+                                } else {
+                                    locationPermissionsLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                                        ),
+                                    )
+                                }
+                            }
+                        },
                         modifier = Modifier.padding(padding),
                     )
 
@@ -286,6 +431,10 @@ fun NexoApp() {
                             themeMode = themeMode,
                             fontScale = appFontScale,
                             overlayPreferences = overlayPreferences,
+                            accessibilityServiceEnabled = accessibilityServiceEnabled,
+                            speakDecision = speechSettings.speakDecision,
+                            galleryTestStatus = galleryTestStatus,
+                            overlayPosition = overlayPosition,
                         ),
                         onThemeModeChanged = { selected ->
                             themeMode = selected
@@ -297,6 +446,28 @@ fun NexoApp() {
                         },
                         onOverlayPreferencesChanged = { selected ->
                             overlayPreferences = overlayPreferencesStore.save(selected)
+                        },
+                        onOverlayPositionChanged = { selected ->
+                            overlayPosition = overlayPositionStore.save(selected)
+                        },
+                        onOpenAccessibilitySettings = {
+                            accessibilityServiceEnabled = context.isDriverAccessibilityServiceEnabled()
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        },
+                        onSpeakDecisionChanged = { enabled ->
+                            speechSettings = speechSettingsStore.save(speechSettings.copy(speakDecision = enabled))
+                        },
+                        onTestGalleryImage = {
+                            if (!Settings.canDrawOverlays(context)) {
+                                galleryTestStatus = "Autorize a sobreposição antes do teste para visualizar o card."
+                                overlaySettingsLauncher.launch(
+                                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")),
+                                )
+                            } else {
+                                galleryImageLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                )
+                            }
                         },
                         modifier = Modifier.padding(padding),
                     )
@@ -363,6 +534,22 @@ fun NexoApp() {
                 onDismiss = { editingRuleId = null },
             )
         }
+        if (showFilterPicker) {
+            FilterPickerSheet(
+                existingRules = activeProfile.rules,
+                onSelect = { addedRule ->
+                    updateActiveProfile { profile ->
+                        profile.updated(
+                            rules = profile.rules + addedRule,
+                            updatedAtEpochMs = System.currentTimeMillis(),
+                        )
+                    }
+                    editingRuleId = addedRule.id
+                    showFilterPicker = false
+                },
+                onDismiss = { showFilterPicker = false },
+            )
+        }
     }
 }
 
@@ -379,6 +566,17 @@ private fun initialPermissionState(context: android.content.Context): Permission
 private fun android.content.Context.overlayPermissionGrant(): PermissionGrant =
     if (Settings.canDrawOverlays(this)) PermissionGrant.GRANTED else PermissionGrant.NOT_REQUESTED
 
+private fun android.content.Context.isDriverAccessibilityServiceEnabled(): Boolean {
+    val expected = ComponentName(this, DriverAccessibilityService::class.java).flattenToString()
+    val enabledServices = Settings.Secure.getString(
+        contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ) ?: return false
+    val splitter = TextUtils.SimpleStringSplitter(':')
+    splitter.setString(enabledServices)
+    return splitter.any { service -> service.equals(expected, ignoreCase = true) }
+}
+
 private fun Metric.shortLabel(): String = when (this) {
     Metric.PAYOUT -> "Pagamento"
     Metric.RATE_PER_KM -> "R$/km"
@@ -393,6 +591,7 @@ private fun Metric.shortLabel(): String = when (this) {
     Metric.HAS_MULTIPLE_STOPS -> "Paradas"
     Metric.IS_LONG_TRIP -> "Viagem longa"
     Metric.IS_TOWARD_DESTINATION -> "Para casa"
+    Metric.ENDS_NEAR_HOME -> "Perto de casa"
 }
 
 @Composable
@@ -402,7 +601,12 @@ private fun DriverBottomBar(selected: AppDestination, onSelected: (AppDestinatio
             NavigationBarItem(
                 selected = selected == destination,
                 onClick = { onSelected(destination) },
-                icon = { Text(destinationIcon(destination)) },
+                icon = {
+                    Icon(
+                        painter = painterResource(destinationIconRes(destination)),
+                        contentDescription = destination.label,
+                    )
+                },
                 label = { Text(destination.label) },
             )
         }
@@ -410,18 +614,17 @@ private fun DriverBottomBar(selected: AppDestination, onSelected: (AppDestinatio
 }
 
 @Composable
-private fun destinationIcon(destination: AppDestination): String = when (destination) {
-    AppDestination.HOME -> "⌂"
-    AppDestination.FILTERS -> "≡"
-    AppDestination.SETTINGS -> "⚙"
-    AppDestination.HOME_DESTINATION -> "⌂"
+private fun destinationIconRes(destination: AppDestination): Int = when (destination) {
+    AppDestination.HOME, AppDestination.HOME_DESTINATION -> R.drawable.ic_navigation_home
+    AppDestination.FILTERS -> R.drawable.ic_navigation_filters
+    AppDestination.SETTINGS -> R.drawable.ic_navigation_settings
 }
 
-private fun DriverDestination.displayName(): String = label ?: "Casa"
+private fun DriverDestination.displayName(): String = label ?: originalAddress ?: "Casa"
 
-private fun DriverDestination.displayDetails(): String =
-    "${"%.5f".format(java.util.Locale.US, coordinate.latitude)}, " +
-        "${"%.5f".format(java.util.Locale.US, coordinate.longitude)} · raio ${arrivalRadiusMeters.toInt()} m"
+private fun DriverDestination.displayDetails(): String = coordinate?.let {
+    "${standardizedAddress ?: originalAddress ?: "Endereço resolvido"} · raio ${arrivalRadiusMeters.toInt()} m"
+} ?: "Somente comparação textual · raio ${arrivalRadiusMeters.toInt()} m"
 
 private fun Context.releaseOfflineMapReadPermission(contentUri: String) {
     runCatching {
@@ -440,7 +643,7 @@ private fun defaultRules(): List<FilterRule> = listOf(
     FilterRule(Metric.PICKUP_DISTANCE, Comparator.AT_MOST, target = 2_500),
     FilterRule(Metric.PASSENGER_RATING, Comparator.AT_LEAST, target = 480),
     FilterRule(Metric.HAS_MULTIPLE_STOPS, Comparator.IS_FALSE),
-    FilterRule(Metric.IS_TOWARD_DESTINATION, Comparator.IS_TRUE, enabled = false),
+    FilterRule(Metric.ENDS_NEAR_HOME, Comparator.IS_TRUE, enabled = false),
 )
 
 private fun addNextRule(rules: List<FilterRule>): List<FilterRule> {

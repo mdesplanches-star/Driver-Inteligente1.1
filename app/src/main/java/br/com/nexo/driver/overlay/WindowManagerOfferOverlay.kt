@@ -2,6 +2,7 @@ package br.com.nexo.driver.overlay
 
 import android.content.Context
 import android.graphics.PixelFormat
+import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.WindowManager
@@ -21,6 +22,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import br.com.nexo.driver.ui.theme.DriverInteligenteTheme
 import br.com.nexo.driver.ui.theme.DriverThemeMode
+import br.com.nexo.driver.overlay.preferences.SharedPreferencesOverlayPositionStore
 
 /**
  * Non-touchable overlay window. It deliberately cannot cover or activate controls from
@@ -30,8 +32,16 @@ import br.com.nexo.driver.ui.theme.DriverThemeMode
 class WindowManagerOfferOverlay(context: Context) : AutoCloseable {
     private val appContext = context.applicationContext
     private val windowManager = context.getSystemService(WindowManager::class.java)
+    private val positionStore = SharedPreferencesOverlayPositionStore.create(appContext)
     private val overlayModel = mutableStateOf<OfferOverlayUiModel?>(null)
     private val appearance = mutableStateOf(OverlayAppearance())
+    // This handler is private to the overlay, so cancelling its callbacks cannot affect the app.
+    private val autoDismissHandler = Handler(Looper.getMainLooper())
+    private val autoDismiss = OverlayAutoDismissController(
+        postDelayed = { delayMs, action -> autoDismissHandler.postDelayed(action, delayMs) },
+        cancelPending = { autoDismissHandler.removeCallbacksAndMessages(null) },
+        onTimeout = ::hide,
+    )
     private var view: ComposeView? = null
     private var owners: OverlayViewTreeOwners? = null
 
@@ -44,7 +54,10 @@ class WindowManagerOfferOverlay(context: Context) : AutoCloseable {
         require(fontScale > 0f) { "Overlay font scale must be positive." }
         overlayModel.value = model
         appearance.value = OverlayAppearance(themeMode, fontScale)
-        if (view != null) return
+        if (view != null) {
+            autoDismiss.restart()
+            return
+        }
         val viewTreeOwners = OverlayViewTreeOwners()
         val composeView = ComposeView(appContext).apply {
             setViewTreeLifecycleOwner(viewTreeOwners)
@@ -66,7 +79,9 @@ class WindowManagerOfferOverlay(context: Context) : AutoCloseable {
             view = composeView
             owners = viewTreeOwners
             viewTreeOwners.onAttached()
+            autoDismiss.restart()
         } catch (failure: RuntimeException) {
+            autoDismiss.cancel()
             view = null
             owners = null
             runCatching { windowManager.removeViewImmediate(composeView) }
@@ -77,8 +92,26 @@ class WindowManagerOfferOverlay(context: Context) : AutoCloseable {
         }
     }
 
+    /**
+     * Replaces a visible card's content without extending its eight-second display interval.
+     * This is used when a late, read-only enrichment (such as destination/GPS) refines an offer
+     * that has already been shown to the driver.
+     */
+    fun update(
+        model: OfferOverlayUiModel,
+        themeMode: DriverThemeMode = DriverThemeMode.SYSTEM,
+        fontScale: Float = 1f,
+    ) {
+        checkMainThread()
+        require(fontScale > 0f) { "Overlay font scale must be positive." }
+        if (view == null) return
+        overlayModel.value = model
+        appearance.value = OverlayAppearance(themeMode, fontScale)
+    }
+
     fun hide() {
         checkMainThread()
+        autoDismiss.cancel()
         val attachedView = view
         view = null
         if (attachedView != null) {
@@ -109,8 +142,11 @@ class WindowManagerOfferOverlay(context: Context) : AutoCloseable {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
         PixelFormat.TRANSLUCENT,
     ).apply {
-        gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        y = 64
+        gravity = when (positionStore.load()) {
+            OverlayPosition.TOP -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            OverlayPosition.BOTTOM -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        }
+        y = (24 * appContext.resources.displayMetrics.density).toInt()
         horizontalMargin = 0.04f
         title = "DriverInteligenteOfferOverlay"
     }

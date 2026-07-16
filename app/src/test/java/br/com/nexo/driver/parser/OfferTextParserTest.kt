@@ -2,8 +2,10 @@ package br.com.nexo.driver.parser
 
 import br.com.nexo.driver.offer.OfferKind
 import br.com.nexo.driver.offer.OfferSource
+import br.com.nexo.driver.offer.FieldSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class OfferTextParserTest {
@@ -36,6 +38,31 @@ class OfferTextParserTest {
     }
 
     @Test
+    fun `marks parsed fields as accessibility when raw text came from accessibility service`() {
+        val offer = registry.parse(
+            RawOfferText(
+                text = """
+                    UberX
+                    R$ 13,58
+                    R$ 1,29/km est.
+                    4,89 (245)
+                    3 min (1,2 km)
+                    Rua Arthur Manoel Iwersen, Curitiba
+                    19 minutos (9,3 km)
+                    Rua Adolfo Saviski, São José dos Pinhais
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+                layoutHint = "uber",
+                fieldSource = FieldSource.ACCESSIBILITY,
+            ),
+        )
+
+        assertEquals(FieldSource.ACCESSIBILITY, offer?.payout?.source)
+        assertEquals(FieldSource.ACCESSIBILITY, offer?.pickup?.duration?.source)
+        assertEquals(FieldSource.ACCESSIBILITY, offer?.passenger?.rating?.source)
+    }
+
+    @Test
     fun `uses Uber card payout instead of unrelated earnings chip behind the overlay`() {
         val offer = registry.parse(
             RawOfferText(
@@ -58,6 +85,151 @@ class OfferTextParserTest {
         assertEquals(129L, offer?.displayedRatePerKm?.value?.cents)
         assertEquals(489L, offer?.passenger?.rating?.value)
         assertEquals(true, offer?.metadata?.hasVerificationBadge)
+    }
+
+    @Test
+    fun `never uses separated dynamic fare as Uber total payout`() {
+        val offer = registry.parse(
+            RawOfferText(
+                text = """
+                    UberX
+                    R$ 32,64
+                    R$ 1,92/km est.
+                    ★
+                    4.91 (318)
+                    R$ 5,25
+                    Tarifa dinâmica incl.
+                    2 min (0,7 km)
+                    Retirada
+                    27 minutos (14,6 km)
+                    Destino
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+                layoutHint = "uber",
+            ),
+        )
+
+        assertEquals(3_264L, offer?.payout?.value?.cents)
+    }
+
+    @Test
+    fun `rebuilds Uber rating when star number and trips are separate OCR lines`() {
+        val offer = registry.parse(
+            RawOfferText(
+                text = """
+                    UberX
+                    R$ 32,64
+                    R$ 1,92/km est.
+                    ★
+                    4.91
+                    (318)
+                    2 min (0,7 km)
+                    Retirada
+                    27 minutos (14,6 km)
+                    Destino
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+                layoutHint = "uber",
+            ),
+        )
+
+        assertEquals(491L, offer?.passenger?.rating?.value)
+        assertEquals(318L, offer?.passenger?.tripCount?.value)
+    }
+
+    @Test
+    fun `rejects Uber card when OCR misses total and only reads dynamic fare`() {
+        val offer = registry.parse(
+            RawOfferText(
+                text = """
+                    UberX
+                    R$ 1,92/km est.
+                    ★ 4.91 (318)
+                    R$ 5,25
+                    ícone promocional
+                    Tarifa dinâmica incl.
+                    2 min (0,7 km)
+                    Retirada
+                    27 minutos (14,6 km)
+                    Destino
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+                layoutHint = "uber",
+            ),
+        )
+
+        assertNull(offer)
+    }
+
+    @Test
+    fun `rejects wait compensation as total when main payout is absent`() {
+        val offer = registry.parse(
+            RawOfferText(
+                text = """
+                    Pgto. no app
+                    R$1,46/km
+                    R$1,81 por espera incl.
+                    4,87 · +999 corridas · Perfil Premium
+                    6min (1,9km)
+                    Rua Nicarágua, Bacacheri
+                    13min (4,9km)
+                    Praça Nossa Senhora de Salete
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+                layoutHint = "99",
+            ),
+        )
+
+        assertNull(offer)
+    }
+
+    @Test
+    fun `parses live Uber Comfort without displayed rate per kilometre`() {
+        val offer = registry.parse(
+            RawOfferText(
+                text = """
+                    Arena da Baixada +R$ 6,50
+                    Comfort Exclusivo
+                    R$ 20,69
+                    4,98 (328) Verificado
+                    +R$ 5,25 incluído
+                    5 min (1.9 km)
+                    Av. Victor Ferreira do Amaral, Curitiba
+                    14 minutos (4.9 km)
+                    Shopping Curitiba, Centro
+                    Aceitar
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+                layoutHint = "uber",
+            ),
+        )
+
+        assertEquals(2_069L, offer?.payout?.value?.cents)
+        assertEquals(498L, offer?.passenger?.rating?.value)
+        assertEquals(2, listOf(offer?.pickup, offer?.trip).count { it?.duration?.value != null })
+    }
+
+    @Test
+    fun `reads rating when OCR merges it with included dynamic value`() {
+        val offer = registry.parse(
+            RawOfferText(
+                text = """
+                    UberX Exclusivo
+                    R$ 29,71
+                    4,96 (163) +R$ 5,25 incluído
+                    6 min (2.4 km)
+                    Rua General Adalberto G. de Menezes, Curitiba
+                    22 minutos (14.5 km)
+                    São José dos Pinhais
+                    Aceitar
+                """.trimIndent(),
+                capturedAtEpochMs = 1L,
+                layoutHint = "uber",
+            ),
+        )
+
+        assertEquals(2_971L, offer?.payout?.value?.cents)
+        assertEquals(496L, offer?.passenger?.rating?.value)
     }
 
     @Test

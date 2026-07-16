@@ -73,7 +73,8 @@ private val Metric.section: FilterSection
         Metric.PAYOUT, Metric.RATE_PER_KM, Metric.RATE_PER_HOUR -> FilterSection.EARNINGS
         Metric.PICKUP_DISTANCE, Metric.PICKUP_DURATION -> FilterSection.PICKUP
         Metric.TRIP_DISTANCE, Metric.TRIP_DURATION, Metric.TOTAL_DISTANCE, Metric.TOTAL_DURATION -> FilterSection.TRIP
-        Metric.PASSENGER_RATING, Metric.HAS_MULTIPLE_STOPS, Metric.IS_LONG_TRIP, Metric.IS_TOWARD_DESTINATION ->
+        Metric.PASSENGER_RATING, Metric.HAS_MULTIPLE_STOPS, Metric.IS_LONG_TRIP,
+        Metric.IS_TOWARD_DESTINATION, Metric.ENDS_NEAR_HOME ->
             FilterSection.PREFERENCES
     }
 
@@ -91,7 +92,7 @@ private val Metric.displayOrder: Int
         Metric.PASSENGER_RATING -> 0
         Metric.HAS_MULTIPLE_STOPS -> 1
         Metric.IS_LONG_TRIP -> 2
-        Metric.IS_TOWARD_DESTINATION -> 3
+        Metric.IS_TOWARD_DESTINATION, Metric.ENDS_NEAR_HOME -> 3
     }
 
 private val Comparator.displayOrder: Int
@@ -115,6 +116,7 @@ private val Metric.displayName: String
         Metric.HAS_MULTIPLE_STOPS -> "Múltiplas paradas"
         Metric.IS_LONG_TRIP -> "Viagem longa"
         Metric.IS_TOWARD_DESTINATION -> "Em direção à casa"
+        Metric.ENDS_NEAR_HOME -> "Destino próximo de casa"
     }
 
 private fun FilterRule.naturalLanguageComparison(): String = when (comparator) {
@@ -132,7 +134,8 @@ private fun FilterRule.formattedTarget(): String? = target?.let { raw ->
         Metric.PICKUP_DISTANCE, Metric.TRIP_DISTANCE, Metric.TOTAL_DISTANCE -> raw.asKilometres()
         Metric.PICKUP_DURATION, Metric.TRIP_DURATION, Metric.TOTAL_DURATION -> raw.asMinutes()
         Metric.PASSENGER_RATING -> "%.2f ★".format(BRAZILIAN_PORTUGUESE, raw / 100.0)
-        Metric.HAS_MULTIPLE_STOPS, Metric.IS_LONG_TRIP, Metric.IS_TOWARD_DESTINATION -> null
+        Metric.HAS_MULTIPLE_STOPS, Metric.IS_LONG_TRIP, Metric.IS_TOWARD_DESTINATION,
+        Metric.ENDS_NEAR_HOME -> null
     }
 }
 
