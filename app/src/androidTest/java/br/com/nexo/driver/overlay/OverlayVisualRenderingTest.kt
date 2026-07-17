@@ -1,10 +1,7 @@
 package br.com.nexo.driver.overlay
 
-import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -44,7 +41,6 @@ class OverlayVisualRenderingTest {
             val screenshot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
             try {
                 assertTrue("Accept green was not rendered in the overlay", screenshot.countPixelsNear(ACCEPT_GREEN) > 150)
-                screenshot.saveToPictures()
             } finally {
                 screenshot.recycle()
             }
@@ -77,26 +73,7 @@ class OverlayVisualRenderingTest {
         return count
     }
 
-    private fun Bitmap.saveToPictures() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, OUTPUT_FILE)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-            put(MediaStore.Images.Media.RELATIVE_PATH, OUTPUT_DIRECTORY)
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
-        val uri = requireNotNull(context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values))
-        context.contentResolver.openOutputStream(uri)?.use { output ->
-            check(compress(Bitmap.CompressFormat.PNG, 100, output))
-        }
-        values.clear()
-        values.put(MediaStore.Images.Media.IS_PENDING, 0)
-        context.contentResolver.update(uri, values, null, null)
-    }
-
     private companion object {
         const val ACCEPT_GREEN = 0xFF39FF88.toInt()
-        const val OUTPUT_FILE = "overlay-accept-latest.png"
-        val OUTPUT_DIRECTORY = Environment.DIRECTORY_PICTURES + "/DriverInteligenteTests"
     }
 }

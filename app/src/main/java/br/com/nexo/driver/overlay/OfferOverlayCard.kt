@@ -75,7 +75,7 @@ fun OfferOverlayCard(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1.18f)) {
                     Text(
                         text = "VALOR DA CORRIDA",
                         style = MaterialTheme.typography.labelMedium,
@@ -85,7 +85,7 @@ fun OfferOverlayCard(
                     )
                     Text(
                         text = model.payout,
-                        style = MaterialTheme.typography.headlineLarge.copy(fontSize = 38.sp),
+                        style = MaterialTheme.typography.headlineLarge.copy(fontSize = 34.sp),
                         fontWeight = FontWeight.ExtraBold,
                         color = payoutColor,
                         maxLines = 1,
@@ -108,7 +108,7 @@ fun OfferOverlayCard(
                     )
                     Text(
                         text = "${model.totalDuration} · ${if (model.totalDistance.isAvailable) model.totalDistance.value else "—"}",
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = textColor,
                         maxLines = 1,
@@ -172,7 +172,7 @@ private fun OverlayMetricCell(
             Spacer(Modifier.height(1.dp))
             Text(
                 text = if (metric.isAvailable) metric.value else "—",
-                style = MaterialTheme.typography.titleLarge.copy(fontSize = 23.sp),
+                style = MaterialTheme.typography.titleLarge.copy(fontSize = 21.sp),
                 fontWeight = FontWeight.ExtraBold,
                 color = color,
                 maxLines = 1,

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -102,7 +103,7 @@ fun SettingsScreen(
                 )
             }
 
-            FontPreview(fontScale = state.fontScale)
+            FontPreview()
 
             Text(
                 text = "Leitura e voz",
@@ -249,7 +250,7 @@ private fun <T> ChoiceGroup(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
+                    .heightIn(min = 48.dp)
                     .selectable(
                         selected = option == selected,
                         role = Role.RadioButton,
@@ -266,7 +267,7 @@ private fun <T> ChoiceGroup(
 }
 
 @Composable
-private fun FontPreview(fontScale: AppFontScale) {
+private fun FontPreview() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -280,17 +281,13 @@ private fun FontPreview(fontScale: AppFontScale) {
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "R$ 2,18/km",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontSize = MaterialTheme.typography.titleLarge.fontSize * fontScale.multiplier,
-                ),
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             Text(
                 text = "Valor por quilômetro da corrida",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = MaterialTheme.typography.bodyMedium.fontSize * fontScale.multiplier,
-                ),
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }

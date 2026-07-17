@@ -29,6 +29,7 @@ fun FilterPickerSheet(
 ) {
     val existingIds = existingRules.map { it.id }.toSet()
     val options = Metric.entries
+        .filterNot { it == Metric.IS_TOWARD_DESTINATION }
         .flatMap { metric -> metric.availableComparators().map { comparator -> metric to comparator } }
         .filterNot { (metric, comparator) -> FilterRuleId(metric, comparator) in existingIds }
 
@@ -62,7 +63,6 @@ fun FilterPickerSheet(
 private fun Metric.availableComparators(): List<Comparator> = when (this) {
     Metric.HAS_MULTIPLE_STOPS,
     Metric.IS_LONG_TRIP,
-    Metric.IS_TOWARD_DESTINATION,
     Metric.ENDS_NEAR_HOME -> listOf(Comparator.IS_TRUE, Comparator.IS_FALSE)
     else -> listOf(Comparator.AT_LEAST, Comparator.AT_MOST)
 }

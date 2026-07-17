@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +55,9 @@ import br.com.nexo.driver.offline.OfflineMapPackage
 import br.com.nexo.driver.ui.theme.DriverInteligenteTheme
 import br.com.nexo.driver.R
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * A deliberately small, offline-first destination setup. Coordinates can be copied from any map
@@ -96,6 +100,7 @@ fun HomeDestinationScreen(
     var validationError by remember { mutableStateOf<String?>(null) }
     var offlineImportMessage by remember { mutableStateOf<String?>(null) }
     var geocodeMessage by remember { mutableStateOf<String?>(null) }
+    val importScope = rememberCoroutineScope()
     val geocoder = remember(context) { GeocoderDestinationResolver(context) }
     LaunchedEffect(addressInput, addressEdited) {
         if (!addressEdited) return@LaunchedEffect
@@ -114,12 +119,23 @@ fun HomeDestinationScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            val mapPackage = context.persistOfflineMapPackage(uri)
-            if (mapPackage == null) {
-                offlineImportMessage = "Não foi possível manter acesso a esse arquivo. Escolha o pacote novamente."
-            } else {
-                onOfflineMapImported(mapPackage)
-                offlineImportMessage = "Pacote vinculado para uso offline."
+            offlineImportMessage = "Validando pacote TSV…"
+            importScope.launch {
+                val result = withContext(Dispatchers.IO) { context.persistOfflineMapPackage(uri) }
+                result.fold(
+                    onSuccess = { mapPackage ->
+                        onOfflineMapImported(mapPackage)
+                        offlineImportMessage = "Pacote TSV validado e vinculado para uso offline."
+                    },
+                    onFailure = { failure ->
+                        offlineImportMessage = when (failure) {
+                            is SecurityException -> "O Android não concedeu acesso permanente ao arquivo. Selecione-o novamente."
+                            is OfflinePackageTooLargeException -> "O pacote excede o limite de 16 MB. Use somente o índice TSV de endereços."
+                            is IllegalArgumentException -> "TSV inválido: confira cabeçalho, coordenadas e codificação UTF-8."
+                            else -> "Não foi possível ler o pacote TSV selecionado."
+                        }
+                    },
+                )
             }
         }
     }
@@ -366,11 +382,9 @@ private fun String.toDecimalOrNull(): Double? = trim().replace(',', '.').toDoubl
 
 private fun Double.toInput(): String = "%.6f".format(java.util.Locale.US, this).trimEnd('0').trimEnd('.')
 
-private fun Context.persistOfflineMapPackage(uri: Uri): OfflineMapPackage? = runCatching {
+private fun Context.persistOfflineMapPackage(uri: Uri): Result<OfflineMapPackage> = runCatching {
     contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    // Opening the stream verifies that the selected document is readable without loading a large
-    // map package in memory. The map engine can later reopen this same persisted URI.
-    checkNotNull(contentResolver.openInputStream(uri)) { "Documento indisponível" }.use { }
+    // The same persisted document URI can be reopened by the in-memory resolver after validation.
     val packageBytes = checkNotNull(contentResolver.openInputStream(uri)).use(::readBoundedOfflineAddressPackage)
     OfflineAddressPackageTsvCodec.decode(packageBytes)
     val metadata = contentResolver.readOfflineMapMetadata(uri)
@@ -380,7 +394,7 @@ private fun Context.persistOfflineMapPackage(uri: Uri): OfflineMapPackage? = run
         sizeBytes = metadata.sizeBytes,
         importedAtEpochMs = System.currentTimeMillis(),
     )
-}.getOrNull()
+}
 
 private fun readBoundedOfflineAddressPackage(input: java.io.InputStream): ByteArray {
     val output = java.io.ByteArrayOutputStream()
@@ -388,11 +402,15 @@ private fun readBoundedOfflineAddressPackage(input: java.io.InputStream): ByteAr
     while (true) {
         val read = input.read(buffer)
         if (read < 0) break
-        check(output.size() + read <= MAX_OFFLINE_ADDRESS_PACKAGE_BYTES) { "Pacote muito grande." }
+        if (output.size() + read > MAX_OFFLINE_ADDRESS_PACKAGE_BYTES) {
+            throw OfflinePackageTooLargeException()
+        }
         output.write(buffer, 0, read)
     }
     return output.toByteArray()
 }
+
+private class OfflinePackageTooLargeException : IllegalArgumentException()
 
 private data class OfflineMapMetadata(
     val displayName: String,

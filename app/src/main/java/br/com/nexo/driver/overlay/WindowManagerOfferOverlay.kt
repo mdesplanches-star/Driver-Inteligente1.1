@@ -146,7 +146,10 @@ class WindowManagerOfferOverlay(context: Context) : AutoCloseable {
             OverlayPosition.TOP -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
             OverlayPosition.BOTTOM -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         }
-        y = (24 * appContext.resources.displayMetrics.density).toInt()
+        // Bottom placement is intentionally lifted above the ride-app action area. Top remains
+        // close to the status area. Both keep the overlay read-only and outside common buttons.
+        val safeOffsetDp = if (positionStore.load() == OverlayPosition.BOTTOM) 160 else 24
+        y = (safeOffsetDp * appContext.resources.displayMetrics.density).toInt()
         horizontalMargin = 0.04f
         title = "DriverInteligenteOfferOverlay"
     }

@@ -77,6 +77,7 @@ import br.com.nexo.driver.gallery.GalleryOfferTester
 import br.com.nexo.driver.gallery.message
 import br.com.nexo.driver.R
 import br.com.nexo.driver.location.CurrentLocationService
+import br.com.nexo.driver.location.CurrentLocationState
 import br.com.nexo.driver.location.CurrentLocationStateRepository
 import java.util.UUID
 
@@ -177,7 +178,8 @@ fun NexoApp() {
 
     BackHandler(
         enabled = editingRuleId != null || showFilterPicker || showPermissionOnboarding ||
-            destination == AppDestination.FILTERS || destination == AppDestination.HOME_DESTINATION,
+            destination == AppDestination.FILTERS || destination == AppDestination.HOME_DESTINATION ||
+            destination == AppDestination.SETTINGS,
     ) {
         when {
             editingRuleId != null -> editingRuleId = null
