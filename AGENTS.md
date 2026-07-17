@@ -20,7 +20,8 @@ Preserve sempre:
 - overlay com `FLAG_SECURE`;
 - nao persistencia de frames;
 - nao persistencia de OCR bruto;
-- nao persistencia de ofertas analisadas;
+- nao persistencia de ofertas analisadas fora do historico local opt-in;
+- historico local de corridas permitido somente quando ativado pelo motorista, com dados sanitizados, opcao de limpar tudo e backup desativado;
 - diagnosticos apenas locais e agregados;
 - backup e extracao de dados sensiveis desativados;
 - decisao apenas visual: aceitar, analisar ou recusar;
@@ -40,7 +41,9 @@ Antes de trabalhar, classifique internamente a tarefa:
 ## Politica de subagentes
 
 - Padrao por tarefa: zero a dois subagentes.
-- Maximo simultaneo normal: quatro.
+- Maximo simultaneo normal: dois; tres somente para release, auditoria completa,
+  regressao multmodulo, mudanca transversal de captura/processamento/UI ou problema
+  arquitetural multidisciplinar.
 - Profundidade maxima: uma camada.
 - Nao forme cadeias profundas de delegacao.
 - Apenas um agente pode editar determinado arquivo na mesma etapa.
@@ -61,6 +64,8 @@ Antes de trabalhar, classifique internamente a tarefa:
 - `privacy_security`: permissoes, MediaProjection, ausencia de INTERNET, dados temporarios, logs, backup, overlay seguro e ausencia de automacao de toque. Use Sol alto.
 - `reviewer`: revisao independente de bugs, regressoes, contratos quebrados e codigo morto. Use Terra alto.
 - `release_gate`: build, testes, lint, R8, assinatura, artefato e checklist final. Use Sol alto.
+- `docs_research`: consulta pontual de documentacao primaria quando uma API, versao ou
+  comportamento recente for determinante. Somente leitura; nao ativar por padrao.
 
 ## Fluxos recomendados
 

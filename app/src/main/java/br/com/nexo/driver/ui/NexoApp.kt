@@ -25,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,15 @@ import androidx.compose.ui.unit.dp
 import br.com.nexo.driver.evaluation.Comparator
 import br.com.nexo.driver.evaluation.FilterRule
 import br.com.nexo.driver.evaluation.Metric
+import br.com.nexo.driver.journey.AutoDecisionMode
+import br.com.nexo.driver.journey.AutoDecisionSettingsStore
+import br.com.nexo.driver.journey.DailyCostSettingsStore
+import br.com.nexo.driver.journey.DailyDriverSummaryCalculator
+import br.com.nexo.driver.journey.RideSessionClockStore
+import br.com.nexo.driver.journey.RideHistoryStatus
+import br.com.nexo.driver.journey.SharedPreferencesRideHistoryStore
+import br.com.nexo.driver.journey.formatBrlCompact
+import br.com.nexo.driver.journey.formatClockDuration
 import br.com.nexo.driver.profile.DriverProfile
 import br.com.nexo.driver.profile.SharedPreferencesProfileStore
 import br.com.nexo.driver.overlay.preferences.SharedPreferencesOverlayPreferenceStore
@@ -59,8 +69,11 @@ import br.com.nexo.driver.ui.filters.FiltersScreenState
 import br.com.nexo.driver.ui.filters.FilterRuleEditorSheet
 import br.com.nexo.driver.ui.filters.FilterPickerSheet
 import br.com.nexo.driver.ui.filters.FilterRuleId
+import br.com.nexo.driver.ui.filters.FilterProfilePresentation
 import br.com.nexo.driver.ui.filters.id
 import br.com.nexo.driver.ui.destination.HomeDestinationScreen
+import br.com.nexo.driver.ui.history.HistoryScreen
+import br.com.nexo.driver.ui.history.HistoryScreenState
 import br.com.nexo.driver.ui.home.HomeScreen
 import br.com.nexo.driver.ui.home.HomeScreenState
 import br.com.nexo.driver.ui.permission.PermissionOnboardingActions
@@ -79,6 +92,7 @@ import br.com.nexo.driver.R
 import br.com.nexo.driver.location.CurrentLocationService
 import br.com.nexo.driver.location.CurrentLocationState
 import br.com.nexo.driver.location.CurrentLocationStateRepository
+import kotlinx.coroutines.delay
 import java.util.UUID
 
 private enum class AppDestination(
@@ -86,6 +100,7 @@ private enum class AppDestination(
     val showInBottomBar: Boolean = true,
 ) {
     HOME("Início"),
+    HISTORY("Histórico"),
     FILTERS("Filtros"),
     SETTINGS("Ajustes"),
     HOME_DESTINATION("Destino casa", showInBottomBar = false),
@@ -108,6 +123,16 @@ fun NexoApp() {
     val speechSettingsStore = remember(context) { SharedPreferencesSpeechSettingsStore.create(context) }
     var speechSettings by remember(speechSettingsStore) {
         mutableStateOf(speechSettingsStore.load())
+    }
+    val rideHistoryStore = remember(context) { SharedPreferencesRideHistoryStore.create(context) }
+    var rideHistory by remember(rideHistoryStore) { mutableStateOf(rideHistoryStore.load()) }
+    val costSettingsStore = remember(context) { DailyCostSettingsStore.create(context) }
+    var costSettings by remember(costSettingsStore) { mutableStateOf(costSettingsStore.load()) }
+    val clockStore = remember(context) { RideSessionClockStore.create(context) }
+    var clockState by remember(clockStore) { mutableStateOf(clockStore.load()) }
+    val autoDecisionSettingsStore = remember(context) { AutoDecisionSettingsStore.create(context) }
+    var autoDecisionSettings by remember(autoDecisionSettingsStore) {
+        mutableStateOf(autoDecisionSettingsStore.load())
     }
     var accessibilityServiceEnabled by remember(context) {
         mutableStateOf(context.isDriverAccessibilityServiceEnabled())
@@ -166,10 +191,28 @@ fun NexoApp() {
     var permissionState by remember { mutableStateOf(initialPermissionState(context)) }
     var pendingLocationStart by remember { mutableStateOf(false) }
     val readiness = readinessEvaluator.evaluate(permissionState, captureSessionId)
+    var clockTickEpochMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            clockTickEpochMs = System.currentTimeMillis()
+        }
+    }
+    val nowEpochMs = clockTickEpochMs
+    val daySummary = DailyDriverSummaryCalculator().summarize(
+        distanceMeters = locationSnapshot.sessionDistanceMeters,
+        clock = clockState,
+        history = rideHistory.entries,
+        settings = costSettings,
+        nowEpochMs = nowEpochMs,
+    )
 
     DisposableEffect(Unit) {
         val locationSubscription = CurrentLocationStateRepository.subscribe { snapshot -> locationSnapshot = snapshot }
-        val offerSubscription = OfferSessionMetricsRepository.subscribe { metrics -> sessionMetrics = metrics }
+        val offerSubscription = OfferSessionMetricsRepository.subscribe { metrics ->
+            sessionMetrics = metrics
+            rideHistory = rideHistoryStore.load()
+        }
         onDispose {
             locationSubscription.close()
             offerSubscription.close()
@@ -179,7 +222,7 @@ fun NexoApp() {
     BackHandler(
         enabled = editingRuleId != null || showFilterPicker || showPermissionOnboarding ||
             destination == AppDestination.FILTERS || destination == AppDestination.HOME_DESTINATION ||
-            destination == AppDestination.SETTINGS,
+            destination == AppDestination.HISTORY || destination == AppDestination.SETTINGS,
     ) {
         when {
             editingRuleId != null -> editingRuleId = null
@@ -197,6 +240,7 @@ fun NexoApp() {
                 if (intent.action != OfferCaptureService.ACTION_READER_STATE_CHANGED) return
                 val active = intent.getBooleanExtra(OfferCaptureService.EXTRA_READER_ACTIVE, false)
                 readerEnabled = active
+                clockState = clockStore.setReaderActive(active)
                 if (!active) {
                     permissionState = permissionReducer.clearMediaProjection(permissionState)
                     captureSessionId = newCaptureSessionId()
@@ -211,6 +255,7 @@ fun NexoApp() {
         )
         // Covers Activity recreation while a valid foreground capture continues.
         readerEnabled = OfferCaptureService.isActive(context)
+        clockState = clockStore.setReaderActive(readerEnabled)
         onDispose { context.unregisterReceiver(receiver) }
     }
 
@@ -325,6 +370,14 @@ fun NexoApp() {
             AppDestination.FILTERS -> FiltersScreen(
                 state = FiltersScreenState(
                     profileName = activeProfile.name,
+                    profiles = profileSnapshot.profiles.map { profile ->
+                        FilterProfilePresentation(
+                            id = profile.id,
+                            name = profile.name,
+                            isActive = profile.id == profileSnapshot.activeProfileId,
+                        )
+                    },
+                    activeProfileId = profileSnapshot.activeProfileId,
                     isProfileEnabled = activeProfile.isEnabled,
                     rules = activeProfile.rules,
                 ),
@@ -337,12 +390,45 @@ fun NexoApp() {
                         profile.updated(isEnabled = enabled, updatedAtEpochMs = System.currentTimeMillis())
                     }
                 },
+                onProfileSelected = { profileId ->
+                    profileSnapshot = profileStore.setActiveProfile(profileId)
+                },
+                onCreateProfile = {
+                    val nextIndex = profileSnapshot.profiles.size + 1
+                    profileSnapshot = profileStore.save(
+                        DriverProfile.create(
+                            name = "Perfil $nextIndex",
+                            rules = defaultRules(),
+                            nowEpochMs = System.currentTimeMillis(),
+                        ),
+                    )
+                    profileSnapshot.activeProfileId?.let { profileSnapshot = profileStore.setActiveProfile(profileSnapshot.profiles.last().id) }
+                },
+                onDeleteActiveProfile = {
+                    val activeId = profileSnapshot.activeProfileId
+                    if (activeId != null && profileSnapshot.profiles.size > 1) {
+                        val afterDelete = profileStore.delete(activeId)
+                        profileSnapshot = afterDelete.activeProfileId
+                            ?.let { afterDelete }
+                            ?: afterDelete.profiles.firstOrNull()
+                                ?.let { profileStore.setActiveProfile(it.id) }
+                            ?: afterDelete
+                    }
+                },
                 onRuleEnabledChange = { ruleId, enabled ->
                     updateActiveProfile { profile ->
                         profile.updated(
                             rules = profile.rules.map { rule ->
                                 if (rule.id == ruleId) rule.copy(enabled = enabled) else rule
                             },
+                            updatedAtEpochMs = System.currentTimeMillis(),
+                        )
+                    }
+                },
+                onRuleDelete = { ruleId ->
+                    updateActiveProfile { profile ->
+                        profile.updated(
+                            rules = profile.rules.filterNot { it.id == ruleId },
                             updatedAtEpochMs = System.currentTimeMillis(),
                         )
                     }
@@ -356,7 +442,7 @@ fun NexoApp() {
                 },
             )
 
-            AppDestination.HOME, AppDestination.SETTINGS -> Scaffold(
+            AppDestination.HOME, AppDestination.HISTORY, AppDestination.SETTINGS -> Scaffold(
                 bottomBar = {
                     DriverBottomBar(selected = destination, onSelected = { destination = it })
                 },
@@ -374,12 +460,22 @@ fun NexoApp() {
                             homeDestinationDetails = homeDestination?.displayDetails(),
                             kilometresAnalyzed = locationSnapshot.sessionDistanceMeters / 1_000.0,
                             offersEvaluated = sessionMetrics.offersEvaluated,
+                            onlineTime = daySummary.onlineMillis.formatClockDuration(),
+                            rideTime = daySummary.rideMillis.formatClockDuration(),
+                            grossProfit = daySummary.grossProfitCents.formatBrlCompact(),
+                            realProfit = daySummary.realProfitCents.formatBrlCompact(),
+                            fuelCost = daySummary.fuelCostCents.formatBrlCompact(),
+                            extraCost = daySummary.extraCostCents.formatBrlCompact(),
+                            rideClockActive = clockState.rideStartedAtEpochMs != null,
+                            autoAcceptEnabled = autoDecisionSettings.autoAcceptEnabled,
+                            autoRejectEnabled = autoDecisionSettings.autoRejectEnabled,
                             location = locationSnapshot,
                         ),
                         onReaderEnabledChanged = { enabled ->
                             if (!enabled) {
                                 OfferCaptureService.stop(context)
                                 readerEnabled = false
+                                clockState = clockStore.setReaderActive(false)
                                 permissionState = permissionReducer.clearMediaProjection(permissionState)
                                 captureSessionId = newCaptureSessionId()
                             } else {
@@ -390,6 +486,31 @@ fun NexoApp() {
                         },
                         onOpenFilters = { destination = AppDestination.FILTERS },
                         onConfigureHome = { destination = AppDestination.HOME_DESTINATION },
+                        onRideClockActiveChanged = { active ->
+                            clockState = clockStore.setRideActive(active)
+                        },
+                        onAutoAcceptChanged = { enabled ->
+                            val next = autoDecisionSettings.copy(
+                                autoAcceptEnabled = enabled,
+                                mode = if (enabled || autoDecisionSettings.autoRejectEnabled) {
+                                    AutoDecisionMode.ASSISTIVE
+                                } else {
+                                    AutoDecisionMode.OFF
+                                },
+                            )
+                            autoDecisionSettings = autoDecisionSettingsStore.save(next)
+                        },
+                        onAutoRejectChanged = { enabled ->
+                            val next = autoDecisionSettings.copy(
+                                autoRejectEnabled = enabled,
+                                mode = if (autoDecisionSettings.autoAcceptEnabled || enabled) {
+                                    AutoDecisionMode.ASSISTIVE
+                                } else {
+                                    AutoDecisionMode.OFF
+                                },
+                            )
+                            autoDecisionSettings = autoDecisionSettingsStore.save(next)
+                        },
                         onLocationEnabledChanged = { enabled ->
                             if (!enabled) {
                                 CurrentLocationService.stop(context)
@@ -428,6 +549,28 @@ fun NexoApp() {
                         modifier = Modifier.padding(padding),
                     )
 
+                    AppDestination.HISTORY -> HistoryScreen(
+                        state = HistoryScreenState(
+                            enabled = rideHistory.enabled,
+                            entries = rideHistory.entries,
+                        ),
+                        onEnabledChanged = { enabled ->
+                            rideHistory = rideHistoryStore.setEnabled(enabled)
+                        },
+                        onClearHistory = {
+                            rideHistory = rideHistoryStore.clear()
+                        },
+                        onRideStatusChanged = { rideId, status ->
+                            rideHistory = rideHistoryStore.updateStatus(rideId, status)
+                            if (status == RideHistoryStatus.IN_RIDE) {
+                                clockState = clockStore.setRideActive(true)
+                            } else if (status == RideHistoryStatus.COMPLETED) {
+                                clockState = clockStore.setRideActive(false)
+                            }
+                        },
+                        modifier = Modifier.padding(padding),
+                    )
+
                     AppDestination.SETTINGS -> SettingsScreen(
                         state = SettingsScreenState(
                             themeMode = themeMode,
@@ -437,6 +580,10 @@ fun NexoApp() {
                             speakDecision = speechSettings.speakDecision,
                             galleryTestStatus = galleryTestStatus,
                             overlayPosition = overlayPosition,
+                            rideHistoryEnabled = rideHistory.enabled,
+                            rideHistoryCount = rideHistory.entries.size,
+                            recentRideHistory = rideHistory.entries.take(5),
+                            costSettings = costSettings,
                         ),
                         onThemeModeChanged = { selected ->
                             themeMode = selected
@@ -458,6 +605,23 @@ fun NexoApp() {
                         },
                         onSpeakDecisionChanged = { enabled ->
                             speechSettings = speechSettingsStore.save(speechSettings.copy(speakDecision = enabled))
+                        },
+                        onRideHistoryEnabledChanged = { enabled ->
+                            rideHistory = rideHistoryStore.setEnabled(enabled)
+                        },
+                        onClearRideHistory = {
+                            rideHistory = rideHistoryStore.clear()
+                        },
+                        onRideStatusChanged = { rideId, status ->
+                            rideHistory = rideHistoryStore.updateStatus(rideId, status)
+                            if (status == RideHistoryStatus.IN_RIDE) {
+                                clockState = clockStore.setRideActive(true)
+                            } else if (status == RideHistoryStatus.COMPLETED) {
+                                clockState = clockStore.setRideActive(false)
+                            }
+                        },
+                        onCostSettingsChanged = { selected ->
+                            costSettings = costSettingsStore.save(selected)
                         },
                         onTestGalleryImage = {
                             if (!Settings.canDrawOverlays(context)) {
@@ -618,6 +782,7 @@ private fun DriverBottomBar(selected: AppDestination, onSelected: (AppDestinatio
 @Composable
 private fun destinationIconRes(destination: AppDestination): Int = when (destination) {
     AppDestination.HOME, AppDestination.HOME_DESTINATION -> R.drawable.ic_navigation_home
+    AppDestination.HISTORY -> R.drawable.ic_navigation_history
     AppDestination.FILTERS -> R.drawable.ic_navigation_filters
     AppDestination.SETTINGS -> R.drawable.ic_navigation_settings
 }

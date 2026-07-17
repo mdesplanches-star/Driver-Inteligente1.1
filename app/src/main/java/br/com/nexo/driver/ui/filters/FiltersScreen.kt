@@ -1,8 +1,12 @@
 package br.com.nexo.driver.ui.filters
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,7 +19,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +30,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,13 +47,17 @@ import br.com.nexo.driver.R
  * Read-only presentation of a profile's rules. The hosting screen owns persistence and opens
  * the rule editor through [onRuleClick] and [onAddFilter].
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FiltersScreen(
     state: FiltersScreenState,
     onNavigateBack: () -> Unit,
     onProfileEnabledChange: (Boolean) -> Unit,
+    onProfileSelected: (String) -> Unit = {},
+    onCreateProfile: () -> Unit = {},
+    onDeleteActiveProfile: () -> Unit = {},
     onRuleEnabledChange: (FilterRuleId, Boolean) -> Unit,
+    onRuleDelete: (FilterRuleId) -> Unit = {},
     onRuleClick: (FilterRuleId) -> Unit,
     onAddFilter: () -> Unit,
     bottomBar: @Composable () -> Unit = {},
@@ -72,7 +80,7 @@ fun FiltersScreen(
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.padding(contentPadding),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            contentPadding = PaddingValues(
                 horizontal = 20.dp,
                 vertical = 16.dp,
             ),
@@ -80,9 +88,14 @@ fun FiltersScreen(
         ) {
             item {
                 ProfileSwitchCard(
+                    profiles = state.profiles,
+                    activeProfileId = state.activeProfileId,
                     profileName = state.profileName,
                     enabled = state.isProfileEnabled,
                     onEnabledChange = onProfileEnabledChange,
+                    onProfileSelected = onProfileSelected,
+                    onCreateProfile = onCreateProfile,
+                    onDeleteActiveProfile = onDeleteActiveProfile,
                 )
             }
 
@@ -94,13 +107,14 @@ fun FiltersScreen(
                             text = section.label.uppercase(),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+                            modifier = Modifier.padding(top = 14.dp, bottom = 2.dp),
                         )
                     }
                     items(sectionRules, key = { it.rule.id.stableKey }) { item ->
                         FilterRuleCard(
                             item = item,
                             onEnabledChange = { onRuleEnabledChange(item.rule.id, it) },
+                            onDelete = { onRuleDelete(item.rule.id) },
                             onClick = { onRuleClick(item.rule.id) },
                         )
                     }
@@ -111,6 +125,8 @@ fun FiltersScreen(
                 OutlinedButton(
                     onClick = onAddFilter,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.52f)),
                 ) {
                     Text("+ Adicionar filtro")
                 }
@@ -121,26 +137,70 @@ fun FiltersScreen(
 
 @Composable
 private fun ProfileSwitchCard(
+    profiles: List<FilterProfilePresentation>,
+    activeProfileId: String?,
     profileName: String,
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
+    onProfileSelected: (String) -> Unit,
+    onCreateProfile: () -> Unit,
+    onDeleteActiveProfile: () -> Unit,
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Aplicar filtros", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Perfil ativo: $profileName",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
+    NeonFilterCard(
+        borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+        backgroundTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Perfil ativo", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = profileName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = if (enabled) "Filtros ligados" else "Filtros pausados",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = enabled, onCheckedChange = onEnabledChange)
             }
-            Spacer(Modifier.width(12.dp))
-            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+            if (profiles.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    profiles.forEach { profile ->
+                        AssistChip(
+                            onClick = { onProfileSelected(profile.id) },
+                            label = { Text(if (profile.id == activeProfileId) "${profile.name} ✓" else profile.name) },
+                        )
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = onCreateProfile,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                ) {
+                    Text("Novo perfil")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    enabled = profiles.size > 1,
+                    onClick = onDeleteActiveProfile,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                ) {
+                    Text("Remover perfil")
+                }
+            }
         }
     }
 }
@@ -149,14 +209,23 @@ private fun ProfileSwitchCard(
 private fun FilterRuleCard(
     item: FilterRulePresentation,
     onEnabledChange: (Boolean) -> Unit,
+    onDelete: () -> Unit,
     onClick: () -> Unit,
 ) {
+    val accent = when {
+        !item.rule.enabled -> MaterialTheme.colorScheme.outline
+        item.rule.mode == EvaluationMode.ELIMINATORY -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.primary
+    }
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (item.rule.enabled) MaterialTheme.colorScheme.surfaceContainerLow
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         ),
+        border = BorderStroke(1.dp, accent.copy(alpha = if (item.rule.enabled) 0.45f else 0.25f)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -171,35 +240,70 @@ private fun FilterRuleCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(5.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = item.comparisonText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     item.valueText?.let { target ->
-                        Spacer(Modifier.width(8.dp))
                         AssistChip(
                             onClick = onClick,
                             label = { Text(target) },
                             border = null,
                         )
                     }
-                }
-                if (item.rule.mode == EvaluationMode.ELIMINATORY) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "Regra eliminatória",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
+                    AssistChip(
+                        onClick = onClick,
+                        label = { Text(item.comparisonText) },
+                        border = null,
                     )
+                    if (item.rule.mode == EvaluationMode.ELIMINATORY) {
+                        AssistChip(
+                            onClick = onClick,
+                            label = { Text("Eliminatória") },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(12.dp))
-            Switch(checked = item.rule.enabled, onCheckedChange = onEnabledChange)
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Switch(checked = item.rule.enabled, onCheckedChange = onEnabledChange)
+                OutlinedButton(
+                    onClick = onDelete,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text("Remover")
+                }
+            }
         }
-        HorizontalDivider(color = Color.Transparent)
+    }
+}
+
+@Composable
+private fun NeonFilterCard(
+    borderColor: Color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+    backgroundTint: Color = Color.Transparent,
+    content: @Composable () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
+        ),
+        border = BorderStroke(1.dp, borderColor),
+    ) {
+        Column(
+            modifier = Modifier
+                .background(
+                    Brush.verticalGradient(
+                        listOf(backgroundTint, Color.Transparent),
+                    ),
+                )
+                .padding(18.dp),
+            content = { content() },
+        )
     }
 }
 
@@ -210,6 +314,12 @@ private fun FiltersScreenPreview() {
         FiltersScreen(
             state = FiltersScreenState(
                 profileName = "Curitiba — padrão",
+                profiles = listOf(
+                    FilterProfilePresentation("daily", "Dia a dia", isActive = true),
+                    FilterProfilePresentation("rain", "Chuva", isActive = false),
+                    FilterProfilePresentation("night", "Noite", isActive = false),
+                ),
+                activeProfileId = "daily",
                 isProfileEnabled = true,
                 rules = sampleRules(),
             ),

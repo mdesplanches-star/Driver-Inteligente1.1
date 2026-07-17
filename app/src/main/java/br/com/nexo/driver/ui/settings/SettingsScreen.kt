@@ -20,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -29,8 +30,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import br.com.nexo.driver.journey.DailyDriverCostSettings
+import br.com.nexo.driver.journey.RideHistoryDecision
+import br.com.nexo.driver.journey.RideHistoryEntry
+import br.com.nexo.driver.journey.RideHistoryStatus
+import br.com.nexo.driver.journey.formatBrlCompact
 import br.com.nexo.driver.overlay.preferences.OverlayMetricField
 import br.com.nexo.driver.overlay.preferences.OverlayPreferences
 import br.com.nexo.driver.overlay.preferences.OverlaySlot
@@ -54,6 +62,10 @@ fun SettingsScreen(
     onOpenAccessibilitySettings: () -> Unit = {},
     onSpeakDecisionChanged: (Boolean) -> Unit = {},
     onTestGalleryImage: () -> Unit = {},
+    onRideHistoryEnabledChanged: (Boolean) -> Unit = {},
+    onClearRideHistory: () -> Unit = {},
+    onRideStatusChanged: (String, RideHistoryStatus) -> Unit = { _, _ -> },
+    onCostSettingsChanged: (DailyDriverCostSettings) -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(title = { Text("Ajustes", fontWeight = FontWeight.SemiBold) })
@@ -155,6 +167,32 @@ fun SettingsScreen(
             }
 
             Text(
+                text = "Jornada e histórico",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            PreferenceCard(
+                title = "Salvar histórico local de corridas",
+                description = "Guarda somente resumo sanitizado da oferta, com endereços quando disponíveis. OCR bruto e imagens nunca são salvos.",
+            ) {
+                ToggleRow(
+                    label = if (state.rideHistoryEnabled) "Histórico ligado (${state.rideHistoryCount})" else "Histórico desligado",
+                    checked = state.rideHistoryEnabled,
+                    onCheckedChange = onRideHistoryEnabledChanged,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onClearRideHistory) {
+                    Text("Limpar histórico")
+                }
+            }
+            PreferenceCard(
+                title = "Custos do dia",
+                description = "Usados para estimar lucro real: bruto menos combustível e custos manuais.",
+            ) {
+                CostSettingsEditor(state.costSettings, onCostSettingsChanged)
+            }
+
+            Text(
                 text = "Campos do overlay",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -171,6 +209,109 @@ fun SettingsScreen(
         }
     }
 }
+
+@Composable
+private fun RideHistoryPreview(
+    entries: List<RideHistoryEntry>,
+    onRideStatusChanged: (String, RideHistoryStatus) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        entries.take(5).forEach { entry ->
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column {
+                    Text(entry.decision.label(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        listOfNotNull(entry.pickupAddress, entry.dropoffAddress).joinToString(" → ").ifBlank { "Endereço não identificado" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    entry.grossCents?.formatBrlCompact() ?: "—",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                when (entry.status) {
+                    RideHistoryStatus.ACCEPTED -> OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onRideStatusChanged(entry.id, RideHistoryStatus.IN_RIDE) },
+                    ) { Text("Marcar em corrida") }
+                    RideHistoryStatus.IN_RIDE -> Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onRideStatusChanged(entry.id, RideHistoryStatus.COMPLETED) },
+                    ) { Text("Concluir corrida") }
+                    else -> Unit
+                }
+            }
+        }
+    }
+}
+
+private fun RideHistoryDecision.label(): String = when (this) {
+    RideHistoryDecision.ACCEPT -> "Aceita"
+    RideHistoryDecision.ANALYZE -> "Analisada"
+    RideHistoryDecision.REJECT -> "Recusada"
+}
+
+@Composable
+private fun CostSettingsEditor(
+    settings: DailyDriverCostSettings,
+    onChanged: (DailyDriverCostSettings) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        DecimalField(
+            label = "Consumo médio (km/l)",
+            value = settings.fuelEfficiencyKmPerLiter,
+            onValue = { onChanged(settings.copy(fuelEfficiencyKmPerLiter = it.coerceAtLeast(0.1))) },
+        )
+        MoneyField("Valor do combustível (R$/l)", settings.fuelPriceCentsPerLiter) {
+            onChanged(settings.copy(fuelPriceCentsPerLiter = it))
+        }
+        MoneyField("Manutenção", settings.maintenanceCents) {
+            onChanged(settings.copy(maintenanceCents = it))
+        }
+        MoneyField("Pneus", settings.tireCents) {
+            onChanged(settings.copy(tireCents = it))
+        }
+        MoneyField("Lavagem", settings.washCents) {
+            onChanged(settings.copy(washCents = it))
+        }
+        MoneyField("Taxas/plataforma", settings.platformFeeCents) {
+            onChanged(settings.copy(platformFeeCents = it))
+        }
+        MoneyField("Outros", settings.otherCents) {
+            onChanged(settings.copy(otherCents = it))
+        }
+    }
+}
+
+@Composable
+private fun DecimalField(label: String, value: Double, onValue: (Double) -> Unit) {
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = "%.1f".format(java.util.Locale.forLanguageTag("pt-BR"), value),
+        onValueChange = { raw -> raw.parseDecimal()?.let(onValue) },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+    )
+}
+
+@Composable
+private fun MoneyField(label: String, cents: Long, onValue: (Long) -> Unit) {
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = "%.2f".format(java.util.Locale.forLanguageTag("pt-BR"), cents / 100.0),
+        onValueChange = { raw -> raw.parseDecimal()?.let { onValue((it * 100).toLong().coerceAtLeast(0)) } },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+    )
+}
+
+private fun String.parseDecimal(): Double? =
+    replace(',', '.').filter { it.isDigit() || it == '.' }.toDoubleOrNull()
 
 @Composable
 private fun ToggleRow(

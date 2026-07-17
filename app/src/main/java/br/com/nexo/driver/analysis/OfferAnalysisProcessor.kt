@@ -9,7 +9,16 @@ import br.com.nexo.driver.destination.OfferDestinationGeocoder
 import br.com.nexo.driver.destination.offline.DestinationOfferEnricher
 import br.com.nexo.driver.destination.offline.OfflineAddressPackageTsvCodec
 import br.com.nexo.driver.destination.offline.OfflineAddressResolver
+import br.com.nexo.driver.evaluation.EvaluationResult
 import br.com.nexo.driver.evaluation.OfferEvaluator
+import br.com.nexo.driver.journey.AutoDecisionEngine
+import br.com.nexo.driver.journey.AutoDecisionSettingsStore
+import br.com.nexo.driver.journey.DailyCostSettingsStore
+import br.com.nexo.driver.journey.DailyDriverSummaryCalculator
+import br.com.nexo.driver.journey.DriverGoalProgressCalculator
+import br.com.nexo.driver.journey.DriverGoalSettingsStore
+import br.com.nexo.driver.journey.SharedPreferencesRideHistoryStore
+import br.com.nexo.driver.journey.toRideHistoryEntry
 import br.com.nexo.driver.offer.Confidence
 import br.com.nexo.driver.offer.FieldSource
 import br.com.nexo.driver.offer.NormalizedOffer
@@ -67,12 +76,14 @@ class OfferAnalysisProcessor(
         val profile = SharedPreferencesProfileStore.create(appContext).load().activeProfile
         val rules = profile?.takeIf { it.isEnabled }?.rules.orEmpty()
         val evaluation = evaluator.evaluate(enrichedOffer, rules)
+        val derived = evaluator.derive(enrichedOffer)
         val overlayPreferences = SharedPreferencesOverlayPreferenceStore.create(appContext).load()
         val overlay = presenter.present(enrichedOffer, evaluation, overlayPreferences.fields)
         val settings = SharedPreferencesSpeechSettingsStore.create(appContext).load()
 
         if (allowSideEffects) {
             OfferSessionMetricsRepository.record(enrichedOffer)
+            recordHistoryIfEnabled(enrichedOffer, evaluation, derived.totalDistance.value?.meters, derived.totalDuration.value?.seconds)
         }
         if (allowSideEffects && settings.speakDecision) {
             speaker?.speak(overlay)
@@ -183,6 +194,51 @@ class OfferAnalysisProcessor(
         return copy(
             endsNearHome = homeMatch,
             fieldConfidence = fieldConfidence + (OfferField.ENDS_NEAR_HOME to homeMatch.score),
+        )
+    }
+
+    private fun recordHistoryIfEnabled(
+        offer: NormalizedOffer,
+        evaluation: EvaluationResult,
+        totalDistanceMeters: Long?,
+        totalDurationSeconds: Long?,
+    ) {
+        val historyStore = SharedPreferencesRideHistoryStore.create(appContext)
+        if (!historyStore.load().enabled) return
+        val settings = DailyCostSettingsStore.create(appContext).load()
+        val goalSettings = DriverGoalSettingsStore.create(appContext).load()
+        val autoDecisionSettings = AutoDecisionSettingsStore.create(appContext).load()
+        val estimatedRealProfit = offer.payout.value?.cents?.let { gross ->
+            DailyDriverSummaryCalculator().realProfitCents(
+                grossCents = gross,
+                distanceMeters = totalDistanceMeters?.toDouble() ?: 0.0,
+                settings = settings,
+            )
+        }
+        val summary = DailyDriverSummaryCalculator().summarize(
+            distanceMeters = totalDistanceMeters?.toDouble() ?: 0.0,
+            clock = br.com.nexo.driver.journey.RideSessionClockState(),
+            history = historyStore.load().entries,
+            settings = settings,
+            nowEpochMs = System.currentTimeMillis(),
+        )
+        val goalProgress = DriverGoalProgressCalculator().calculate(summary, goalSettings)
+        val autoDecision = AutoDecisionEngine().decide(
+            settings = autoDecisionSettings,
+            evaluation = evaluation,
+            estimatedRealProfitCents = estimatedRealProfit,
+            goalProgress = goalProgress,
+        )
+        historyStore.record(
+            offer.toRideHistoryEntry(
+                decision = evaluation.decision,
+                totalDistanceMeters = totalDistanceMeters,
+                totalDurationSeconds = totalDurationSeconds,
+                estimatedRealProfitCents = estimatedRealProfit,
+            ).copy(
+                autoDecision = autoDecision.action,
+                autoDecisionMode = autoDecision.mode,
+            ),
         )
     }
 

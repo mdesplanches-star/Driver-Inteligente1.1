@@ -1,0 +1,7 @@
+resource_budget:
+  reconnaissance: { max_initial_files: 12, max_search_rounds: 3 }
+  implementation: { max_primary_files_changed: 6, max_support_files_changed: 6 }
+  testing: { targeted_first: true, full_suite_at_gate: true }
+  documentation: { update_only_when_state_changes: true }
+  external_research: { default_enabled: false, allow_when_version_sensitive: true }
+exception: "Record the scope reason in the Task Brief before exceeding a limit."
