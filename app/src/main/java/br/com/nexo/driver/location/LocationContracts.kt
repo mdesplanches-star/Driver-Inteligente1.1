@@ -1,12 +1,8 @@
 package br.com.nexo.driver.location
 
-import kotlin.math.PI
-import kotlin.math.atan2
-import kotlin.math.cos
+import br.com.nexo.driver.geo.GeoMath
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 /** WGS-84 point kept only in memory by the optional foreground location service. */
 data class GeoPoint(
@@ -150,7 +146,10 @@ class LocationMovementAccumulator(
         }
         val elapsedNanos = fix.elapsedRealtimeNanos - previous.elapsedRealtimeNanos
         if (elapsedNanos <= 0L) return snapshot(rejection = LocationMovementRejection.NON_MONOTONIC_CLOCK)
-        val distance = haversineMeters(previous.point, fix.point)
+        val distance = GeoMath.haversineMeters(
+            previous.point.latitude, previous.point.longitude,
+            fix.point.latitude, fix.point.longitude,
+        )
         val calculatedSpeed = distance / (elapsedNanos / NANOS_PER_SECOND.toDouble())
         if (calculatedSpeed * KMH_PER_MPS > maximumSpeedKmh) {
             return snapshot(calculatedSpeedMps = calculatedSpeed, rejection = LocationMovementRejection.CALCULATED_SPEED_OUTLIER)
@@ -174,16 +173,6 @@ class LocationMovementAccumulator(
         rejection: LocationMovementRejection? = null,
     ) = LocationMovementUpdate(sessionDistanceMeters, addedDistanceMeters, calculatedSpeedMps, ignoredAsJitter, rejection)
 
-    private fun haversineMeters(from: GeoPoint, to: GeoPoint): Double {
-        val latitudeDelta = (to.latitude - from.latitude) * PI / 180.0
-        val longitudeDelta = (to.longitude - from.longitude) * PI / 180.0
-        val fromLatitude = from.latitude * PI / 180.0
-        val toLatitude = to.latitude * PI / 180.0
-        val a = (sin(latitudeDelta / 2.0) * sin(latitudeDelta / 2.0) +
-            cos(fromLatitude) * cos(toLatitude) * sin(longitudeDelta / 2.0) * sin(longitudeDelta / 2.0)).coerceIn(0.0, 1.0)
-        return EARTH_MEAN_RADIUS_METERS * 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
-    }
-
     private companion object {
         const val MAXIMUM_SPEED_KMH = 170.0
         const val KMH_PER_MPS = 3.6
@@ -191,7 +180,6 @@ class LocationMovementAccumulator(
         const val MIN_JITTER_METERS = 5.0
         const val MAX_JITTER_METERS = 25.0
         const val JITTER_ACCURACY_FACTOR = 0.35
-        const val EARTH_MEAN_RADIUS_METERS = 6_371_008.8
     }
 }
 

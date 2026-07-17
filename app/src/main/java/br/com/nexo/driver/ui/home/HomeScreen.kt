@@ -38,6 +38,9 @@ data class HomeScreenState(
     val kilometresAnalyzed: Double = 0.0,
     val offersEvaluated: Int = 0,
     val location: CurrentLocationServiceSnapshot = CurrentLocationServiceSnapshot(),
+    val fuelVehicleLabel: String? = null,
+    val fuelEstimateSummary: String? = null,
+    val regionsSummary: String? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,6 +51,8 @@ fun HomeScreen(
     onOpenFilters: () -> Unit,
     onConfigureHome: () -> Unit,
     onLocationEnabledChanged: (Boolean) -> Unit = {},
+    onConfigureFuel: () -> Unit = {},
+    onConfigureRegions: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -69,6 +74,8 @@ fun HomeScreen(
             CurrentLocationCard(state.location, onLocationEnabledChanged)
             ProfileCard(state.activeProfileName, state.activeProfileSummary, onOpenFilters)
             HomeDestinationCard(state.homeDestination, state.homeDestinationDetails, onConfigureHome)
+            FuelCard(state.fuelVehicleLabel, state.fuelEstimateSummary, onConfigureFuel)
+            RegionsCard(state.regionsSummary, onConfigureRegions)
             TodaySummary(state.kilometresAnalyzed, state.offersEvaluated)
         }
     }
@@ -173,6 +180,38 @@ private fun HomeDestinationCard(
             details ?: "Informe o endereço e escolha um raio. O pacote TSV é opcional.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun FuelCard(vehicleLabel: String?, estimateSummary: String?, onConfigureFuel: () -> Unit) {
+    SectionCard(onClick = onConfigureFuel) {
+        Text("Combustível", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            vehicleLabel ?: "Configurar veículo",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            estimateSummary ?: "Informe o consumo médio para estimar o gasto da sessão.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun RegionsCard(regionsSummary: String?, onConfigureRegions: () -> Unit) {
+    SectionCard(onClick = onConfigureRegions) {
+        Text("Regiões boas/ruins", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            regionsSummary ?: "Nenhuma região cadastrada",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }
