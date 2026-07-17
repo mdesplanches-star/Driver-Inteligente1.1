@@ -1,0 +1,12 @@
+delegation:
+  simple_task: { max_subagents: 0 }
+  localized_feature: { max_subagents: 1 }
+  cross_module_feature: { max_subagents: 2 }
+  architecture_or_release: { max_subagents: 3 }
+  default_parallel_limit: 2
+  absolute_parallel_limit: 3
+rules:
+  - "Only the orchestrator (the root agent) coordinates agents."
+  - "Create a Task Brief before delegation; simple tasks do not need one."
+  - "Do not delegate a one-file edit, prose change, isolated unit test, or quick investigation."
+  - "Agents editing a shared area run sequentially; the contract owner finishes first."

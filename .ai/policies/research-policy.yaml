@@ -1,0 +1,9 @@
+research:
+  default: disabled
+  allowed_when:
+    - "an Android, Gradle, Kotlin, Compose, Hilt, Room, DataStore, coroutine, MediaProjection or Accessibility API may have changed"
+    - "a version or compatibility error is decisive"
+  source_order: ["official Android or library documentation", "official release notes", "public examples with compatible licenses"]
+  record: ["source URL", "version or date", "applicable implication"]
+  forbidden: ["secrets or credentials", "blind dependency adoption", "research unrelated to the current task"]
+resolved_library_ids: {}

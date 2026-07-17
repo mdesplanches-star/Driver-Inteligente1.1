@@ -1,0 +1,21 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Concise agent result
+type: object
+required: [status, summary, files_read, files_changed, tests, decisions, risks, blockers, needs_followup]
+properties:
+  status: { enum: [completed, blocked, failed] }
+  summary: { type: string }
+  files_read: { type: array, items: { type: string } }
+  files_changed: { type: array, items: { type: string } }
+  tests:
+    type: object
+    required: [passed, failed, not_run]
+    properties:
+      passed: { type: array, items: { type: string } }
+      failed: { type: array, items: { type: string } }
+      not_run: { type: array, items: { type: string } }
+  decisions: { type: array, items: { type: string } }
+  risks: { type: array, items: { type: string } }
+  blockers: { type: array, items: { type: string } }
+  needs_followup: { type: boolean }
+additionalProperties: false

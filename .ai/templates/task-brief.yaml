@@ -1,0 +1,13 @@
+task_id: ""
+title: ""
+goal: ""
+context: []
+owner: ""
+supporting_agents: []
+allowed_files: []
+forbidden_files: []
+dependencies: []
+acceptance_criteria: []
+verification: []
+external_research_allowed: false
+device_test_required: false

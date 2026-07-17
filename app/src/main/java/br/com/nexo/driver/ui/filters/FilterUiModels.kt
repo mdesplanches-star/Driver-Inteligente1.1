@@ -21,8 +21,16 @@ enum class FilterSection(val label: String) {
 
 data class FiltersScreenState(
     val profileName: String,
+    val profiles: List<FilterProfilePresentation> = emptyList(),
+    val activeProfileId: String? = null,
     val isProfileEnabled: Boolean,
     val rules: List<FilterRule>,
+)
+
+data class FilterProfilePresentation(
+    val id: String,
+    val name: String,
+    val isActive: Boolean,
 )
 
 /** Stable identity for a rule inside a profile. A numeric metric may have both bounds. */

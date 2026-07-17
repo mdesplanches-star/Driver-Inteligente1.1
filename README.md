@@ -53,6 +53,10 @@ O APK release é gerado em `app/build/outputs/apk/release/app-release.apk`. Cons
 - [Revisão de arquitetura](ARCHITECTURE_REVIEW.md)
 - [Implementação GPS, Casa e UI](docs/GPS_HOME_UI_IMPLEMENTATION_LOG.md)
 - [Orquestração Codex](docs/CODEX_ORCHESTRATION.md)
+- [Estado atual](docs/CURRENT_STATE.md)
+- [Arquitetura vigente](docs/ARCHITECTURE.md)
+- [Matriz de testes](docs/TEST_MATRIX.md)
+- [Status de release](docs/RELEASE_STATUS.md)
 - [Pacote offline de endereços](docs/OFFLINE_ADDRESS_PACK.md)
 
 ## Aviso

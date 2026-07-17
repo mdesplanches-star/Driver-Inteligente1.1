@@ -1,0 +1,12 @@
+ownership:
+  orchestrator:
+    paths: [".ai/**", "docs/**", "AGENTS.md", ".codex/config.toml", ".codex/agents/**", ".codex/scripts/**"]
+  android-core:
+    paths: ["app/build.gradle.kts", "gradle/**", "app/src/main/java/br/com/nexo/driver/{capture,permission,profile,location,offline,analysis,speech}/**"]
+  offer-intelligence:
+    paths: ["app/src/main/java/br/com/nexo/driver/{accessibility,ocr,parser,offer,evaluation,destination}/**", "app/src/{test,androidTest}/java/br/com/nexo/driver/{accessibility,ocr,parser,offer,evaluation,destination}/**", "app/src/androidTest/assets/offer-fixtures/**"]
+  ui-ux-compose:
+    paths: ["app/src/main/java/br/com/nexo/driver/{ui,overlay,gallery}/**", "app/src/{test,androidTest}/java/br/com/nexo/driver/{ui,overlay}/**", "app/src/main/res/**"]
+  quality-gate:
+    paths: ["read-only by default; tests and review documentation only when explicitly assigned"]
+rule: "Path ownership is exclusive during one task stage. Glob patterns describe scope, not permission to edit concurrently."

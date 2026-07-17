@@ -5,6 +5,8 @@ import br.com.nexo.driver.overlay.preferences.OverlayPreferences
 import br.com.nexo.driver.overlay.preferences.OverlaySlot
 import br.com.nexo.driver.overlay.preferences.OverlayMetricField
 import br.com.nexo.driver.overlay.OverlayPosition
+import br.com.nexo.driver.journey.DailyDriverCostSettings
+import br.com.nexo.driver.journey.RideHistoryEntry
 
 /**
  * Preferences exposed by the first version of the settings screen.
@@ -20,6 +22,10 @@ data class SettingsScreenState(
     val speakDecision: Boolean = true,
     val galleryTestStatus: String? = null,
     val overlayPosition: OverlayPosition = OverlayPosition.BOTTOM,
+    val rideHistoryEnabled: Boolean = false,
+    val rideHistoryCount: Int = 0,
+    val recentRideHistory: List<RideHistoryEntry> = emptyList(),
+    val costSettings: DailyDriverCostSettings = DailyDriverCostSettings(),
 )
 
 enum class AppFontScale(

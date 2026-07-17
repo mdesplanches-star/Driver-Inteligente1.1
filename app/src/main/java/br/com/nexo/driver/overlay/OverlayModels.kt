@@ -20,6 +20,7 @@ data class OfferOverlayUiModel(
     val status: OverlayStatus,
     val totalDuration: String,
     val payout: String,
+    val profit: String = payout,
     /**
      * The payout remains the single primary value in the header (it is not
      * repeated in the 2×2 grid), but still receives its own filter colour.

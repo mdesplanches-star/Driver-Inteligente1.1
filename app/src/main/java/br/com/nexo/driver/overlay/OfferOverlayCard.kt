@@ -41,151 +41,125 @@ fun OfferOverlayCard(
     model: OfferOverlayUiModel,
     modifier: Modifier = Modifier,
 ) {
-    val decisionColor = statusColor(model.status)
-    val payoutColor = statusColor(
-        if (model.isPayoutAvailable) model.payoutStatus else OverlayStatus.UNKNOWN,
-    )
-    val background = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
+    val decisionColor = if (model.isTowardHome && model.status != OverlayStatus.REJECT) {
+        Color(0xFFB45CFF)
+    } else {
+        statusColor(model.status)
+    }
+    val background = Color(0xFF101214).copy(alpha = 0.94f)
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val textColor = MaterialTheme.colorScheme.onSurface
+    val textColor = Color.White
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = OverlayShape,
+        shape = RoundedCornerShape(18.dp),
         color = background,
-        border = BorderStroke(3.dp, decisionColor),
+        border = BorderStroke(2.5.dp, decisionColor),
         tonalElevation = 0.dp,
-        shadowElevation = 12.dp,
+        shadowElevation = 18.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                StatusChip(status = model.status)
+                StatusChip(status = model.status, forcedLabel = if (model.isTowardHome && model.status != OverlayStatus.REJECT) "SENTIDO CASA" else null)
                 Spacer(Modifier.weight(1f))
-                if (model.isTowardHome) {
-                    HomeBadge()
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1.18f)) {
-                    Text(
-                        text = "VALOR DA CORRIDA",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = labelColor,
-                        letterSpacing = 1.sp,
-                    )
-                    Text(
-                        text = model.payout,
-                        style = MaterialTheme.typography.headlineLarge.copy(fontSize = 34.sp),
-                        fontWeight = FontWeight.ExtraBold,
-                        color = payoutColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Column(
-                    modifier = Modifier.weight(0.82f),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    Text(
-                        text = "TEMPO • DISTÂNCIA",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = labelColor,
-                        letterSpacing = 0.8.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = "${model.totalDuration} · ${if (model.totalDistance.isAvailable) model.totalDistance.value else "—"}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = textColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(9.dp))
-            OverlayMetricGrid(model)
-        }
-    }
-}
-
-@Composable
-private fun OverlayMetricGrid(model: OfferOverlayUiModel) {
-    val metrics = model.gridFields.map { field -> field.label to model.metricFor(field) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OverlayMetricCell(metrics[0].first, metrics[0].second, Modifier.weight(1f))
-            OverlayMetricCell(metrics[1].first, metrics[1].second, Modifier.weight(1f))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OverlayMetricCell(metrics[2].first, metrics[2].second, Modifier.weight(1f))
-            OverlayMetricCell(metrics[3].first, metrics[3].second, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun OverlayMetricCell(
-    label: String,
-    metric: OverlayMetricUi,
-    modifier: Modifier = Modifier,
-) {
-    val color = statusColor(if (metric.isAvailable) metric.status else OverlayStatus.UNKNOWN)
-    Surface(
-        modifier = modifier.heightIn(min = 70.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = color.copy(alpha = 0.16f),
-        border = BorderStroke(1.5.dp, color.copy(alpha = 0.9f)),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
+                        .size(34.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(color),
-                )
-                Spacer(Modifier.width(6.dp))
+                        .background(decisionColor.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("◉", color = decisionColor, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            OverlayMetricStrip(model, decisionColor, labelColor, textColor)
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = 0.12f)),
+            )
+            Spacer(Modifier.height(11.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = label.uppercase(),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 0.5.sp,
+                    text = "⌁ Distância: ${if (model.totalDistance.isAvailable) model.totalDistance.value else "—"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.74f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "◷ Duração: ${model.totalDuration}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(1.dp))
-            Text(
-                text = if (metric.isAvailable) metric.value else "—",
-                style = MaterialTheme.typography.titleLarge.copy(fontSize = 21.sp),
-                fontWeight = FontWeight.ExtraBold,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
 
 @Composable
-private fun StatusChip(status: OverlayStatus) {
+private fun OverlayMetricStrip(
+    model: OfferOverlayUiModel,
+    accent: Color,
+    labelColor: Color,
+    textColor: Color,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        StripMetric("R$/km", model.ratePerKm.value, model.ratePerKm.status, Modifier.weight(1f), labelColor, textColor)
+        StripMetric("R$/h", model.ratePerHour.value, model.ratePerHour.status, Modifier.weight(1f), labelColor, textColor)
+        StripMetric("Avaliação", "${model.passengerRating.value} ★", model.passengerRating.status, Modifier.weight(1f), labelColor, textColor)
+        StripMetric("Lucro", model.profit, model.payoutStatus, Modifier.weight(1f), labelColor, textColor, accent)
+    }
+}
+
+@Composable
+private fun StripMetric(
+    label: String,
+    value: String,
+    status: OverlayStatus,
+    modifier: Modifier = Modifier,
+    labelColor: Color,
+    textColor: Color,
+    forcedColor: Color? = null,
+) {
+    val color = forcedColor ?: statusColor(status)
+    Column(modifier = modifier.padding(end = 7.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+            fontWeight = FontWeight.ExtraBold,
+            color = if (status == OverlayStatus.UNKNOWN) textColor else color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun StatusChip(status: OverlayStatus, forcedLabel: String? = null) {
     val color = statusColor(status)
-    val label = when (status) {
+    val label = forcedLabel ?: when (status) {
         OverlayStatus.ACCEPT -> "ACEITAR"
         OverlayStatus.ANALYZE -> "ANALISAR"
         OverlayStatus.REJECT -> "RECUSAR"

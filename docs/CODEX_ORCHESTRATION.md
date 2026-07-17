@@ -55,9 +55,11 @@ docs/CODEX_ORCHESTRATION.md
 
 `AGENTS.md` contem a politica duravel do repositorio: classes A-D, limites de subagentes, garantias obrigatorias, autonomia permitida e validacao padrao.
 
-`.codex/config.toml` define o default de projeto como `gpt-5.6-terra` com `medium`, habilita metas e multiagentes, limita concorrencia normal a quatro threads, limita profundidade a uma camada e usa `workspace-write` com rede desabilitada no sandbox de escrita.
+`.codex/config.toml` define o default de projeto como `gpt-5.6-terra` com `medium`, habilita metas e multiagentes, limita a concorrencia absoluta a tres threads (duas por padrao), limita profundidade a uma camada e usa `workspace-write` com rede desabilitada no sandbox de escrita.
 
-`.codex/agents/*.toml` define os dez especialistas principais. Os agentes antigos `metric_tests`, `privacy_lifecycle_audit` e `rating_regression` foram consolidados como responsabilidades internas de `tester`, `privacy_security` e `ocr_parser`.
+`.codex/agents/*.toml` define dez especialistas principais e `docs_research`, temporario e somente leitura. Os agentes antigos `metric_tests`, `privacy_lifecycle_audit` e `rating_regression` foram consolidados como responsabilidades internas de `tester`, `privacy_security` e `ocr_parser`.
+
+Os contratos, skills, templates e policies portaveis estao em `.ai/`. Consulte `docs/CURRENT_STATE.md` no inicio de tarefas relevantes. O root funciona como orquestrador; nao existe um agente duplicado para essa funcao.
 
 `.codex/hooks.json` registra hooks locais em `PostToolUse` e `Stop`. O comando chamado e `.codex/hooks/driver_policy_guard.ps1`, que checa mecanicamente as garantias centrais do app depois de comandos/patches e ao finalizar o turno. Por serem hooks locais, o Codex deve pedir revisao/confianca na proxima sessao antes de executa-los automaticamente.
 
@@ -86,19 +88,20 @@ docs/CODEX_ORCHESTRATION.md
 | `privacy_security` | `gpt-5.6-sol` | `high` | `workspace-write` | Privacidade e seguranca independente. |
 | `reviewer` | `gpt-5.6-terra` | `high` | `read-only` | Revisao independente. |
 | `release_gate` | `gpt-5.6-sol` | `high` | `workspace-write` | Build, lint, R8, assinatura e gate final. |
+| `docs_research` | `gpt-5.6-terra` | `medium` | `read-only` | Documentacao primaria, somente quando uma versao/API for decisiva. |
 
 ## Fluxos
 
 Tarefa normal:
 
 ```text
-root -> explorer quando necessario -> implementador -> tester ou reviewer -> root consolida
+root/orchestrator -> explorer quando necessario -> implementador -> tester ou reviewer -> root consolida
 ```
 
 Tarefa critica:
 
 ```text
-root -> architect -> implementador -> tester -> privacy_security -> release_gate -> root consolida
+root/orchestrator -> architect -> implementador -> tester -> privacy_security -> release_gate -> root consolida
 ```
 
 ## Simulacoes de roteamento

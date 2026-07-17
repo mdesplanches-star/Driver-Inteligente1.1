@@ -47,8 +47,8 @@ android {
         debug {
             // Instrumented tests may install/uninstall this package without touching the signed
             // app used by the driver on the device.
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            applicationIdSuffix = ".testing"
+            versionNameSuffix = "-testing"
         }
         release {
             isMinifyEnabled = true
