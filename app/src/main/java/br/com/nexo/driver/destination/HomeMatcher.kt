@@ -1,10 +1,6 @@
 package br.com.nexo.driver.destination
 
-import kotlin.math.PI
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
+import br.com.nexo.driver.geo.GeoMath
 
 /**
  * A resolved end point of an offered trip. It deliberately represents the drop-off only: a
@@ -162,21 +158,10 @@ class HomeMatcher {
         }
     }
 
-    private fun distanceMeters(from: GeoCoordinate, to: GeoCoordinate): Double {
-        val latitudeDelta = (to.latitude - from.latitude).toRadians()
-        val longitudeDelta = (to.longitude - from.longitude).toRadians()
-        val fromLatitude = from.latitude.toRadians()
-        val toLatitude = to.latitude.toRadians()
-        val a = (sin(latitudeDelta / 2.0) * sin(latitudeDelta / 2.0) +
-            cos(fromLatitude) * cos(toLatitude) * sin(longitudeDelta / 2.0) * sin(longitudeDelta / 2.0)
-            ).coerceIn(0.0, 1.0)
-        return EARTH_MEAN_RADIUS_METERS * 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
-    }
-
-    private fun Double.toRadians(): Double = this * PI / 180.0
+    private fun distanceMeters(from: GeoCoordinate, to: GeoCoordinate): Double =
+        GeoMath.haversineMeters(from.latitude, from.longitude, to.latitude, to.longitude)
 
     private companion object {
-        const val EARTH_MEAN_RADIUS_METERS = 6_371_008.8
         const val MIN_ADDRESS_NORMALIZED_LENGTH = 6
         const val MIN_RELEVANT_TOKENS = 2
         const val MIN_TOKEN_SIMILARITY = 0.70

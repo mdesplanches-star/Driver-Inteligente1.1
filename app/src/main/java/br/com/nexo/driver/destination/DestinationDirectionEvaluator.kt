@@ -1,10 +1,6 @@
 package br.com.nexo.driver.destination
 
-import kotlin.math.PI
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
+import br.com.nexo.driver.geo.GeoMath
 
 /** A geographic coordinate expressed in WGS-84 decimal degrees. */
 data class GeoCoordinate(
@@ -165,20 +161,6 @@ class DestinationDirectionEvaluator(
 
     private fun unknown() = DestinationDirectionResult(DestinationDirectionStatus.UNKNOWN)
 
-    /** Haversine great-circle distance in meters using the IUGG mean Earth radius. */
-    private fun distanceMeters(from: GeoCoordinate, to: GeoCoordinate): Double {
-        val latitudeDelta = (to.latitude - from.latitude).toRadians()
-        val longitudeDelta = (to.longitude - from.longitude).toRadians()
-        val fromLatitude = from.latitude.toRadians()
-        val toLatitude = to.latitude.toRadians()
-        val a = sin(latitudeDelta / 2.0) * sin(latitudeDelta / 2.0) +
-            cos(fromLatitude) * cos(toLatitude) * sin(longitudeDelta / 2.0) * sin(longitudeDelta / 2.0)
-        return EARTH_MEAN_RADIUS_METERS * 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
-    }
-
-    private fun Double.toRadians(): Double = this * PI / 180.0
-
-    private companion object {
-        const val EARTH_MEAN_RADIUS_METERS = 6_371_008.8
-    }
+    private fun distanceMeters(from: GeoCoordinate, to: GeoCoordinate): Double =
+        GeoMath.haversineMeters(from.latitude, from.longitude, to.latitude, to.longitude)
 }

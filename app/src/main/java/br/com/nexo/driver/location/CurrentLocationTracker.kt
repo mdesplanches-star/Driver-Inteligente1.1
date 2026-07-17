@@ -113,8 +113,23 @@ class CurrentLocationTracker(
 
     private fun publish(state: CurrentLocationState): CurrentLocationState {
         CurrentLocationStateRepository.update(state)
+        updateRawPosition(state)
         onStateChanged(state)
         return state
+    }
+
+    /**
+     * Feeds the geofence-only raw position channel. Kept separate from the presentation-safe
+     * [CurrentLocationStateRepository] snapshot, which deliberately never exposes coordinates.
+     */
+    private fun updateRawPosition(state: CurrentLocationState) {
+        when (state) {
+            is CurrentLocationState.Available -> RawPositionRepository.update(
+                RawPosition(state.fix.point.latitude, state.fix.point.longitude, state.fix.capturedAtEpochMs),
+            )
+            CurrentLocationState.Idle -> RawPositionRepository.update(null)
+            else -> Unit
+        }
     }
 
     private fun CurrentLocationState.withSessionDistance(sessionDistanceMeters: Double): CurrentLocationState = when (this) {

@@ -79,6 +79,17 @@ import br.com.nexo.driver.R
 import br.com.nexo.driver.location.CurrentLocationService
 import br.com.nexo.driver.location.CurrentLocationState
 import br.com.nexo.driver.location.CurrentLocationStateRepository
+import br.com.nexo.driver.fuel.FuelConsumptionEstimate
+import br.com.nexo.driver.fuel.FuelConsumptionEstimator
+import br.com.nexo.driver.fuel.FuelType
+import br.com.nexo.driver.fuel.SharedPreferencesFuelProfileStore
+import br.com.nexo.driver.geofence.Region
+import br.com.nexo.driver.geofence.RegionMembershipRepository
+import br.com.nexo.driver.geofence.RegionMembershipTracker
+import br.com.nexo.driver.geofence.SharedPreferencesRegionStore
+import br.com.nexo.driver.ui.fuel.VehicleFuelScreen
+import br.com.nexo.driver.ui.geofence.RegionsScreen
+import java.util.Locale
 import java.util.UUID
 
 private enum class AppDestination(
@@ -89,6 +100,8 @@ private enum class AppDestination(
     FILTERS("Filtros"),
     SETTINGS("Ajustes"),
     HOME_DESTINATION("Destino casa", showInBottomBar = false),
+    VEHICLE_FUEL("Veículo e combustível", showInBottomBar = false),
+    REGIONS("Regiões boas/ruins", showInBottomBar = false),
 }
 
 @Composable
@@ -153,6 +166,17 @@ fun NexoApp() {
         )
     }
     val activeProfile = requireNotNull(profileSnapshot.activeProfile)
+    val fuelProfileStore = remember(context) { SharedPreferencesFuelProfileStore.create(context) }
+    var fuelProfileSnapshot by remember(fuelProfileStore) { mutableStateOf(fuelProfileStore.load()) }
+    val fuelConsumptionEstimator = remember { FuelConsumptionEstimator() }
+    val regionStore = remember(context) { SharedPreferencesRegionStore.create(context) }
+    var regionSnapshot by remember(regionStore) { mutableStateOf(regionStore.load()) }
+    val regionMembershipTracker = remember(regionStore) { RegionMembershipTracker(regionStore) }
+    var regionMemberships by remember { mutableStateOf(RegionMembershipRepository.current()) }
+    DisposableEffect(regionMembershipTracker) {
+        regionMembershipTracker.start()
+        onDispose { regionMembershipTracker.close() }
+    }
     var destination by remember { mutableStateOf(AppDestination.HOME) }
     var editingRuleId by remember { mutableStateOf<FilterRuleId?>(null) }
     var showFilterPicker by remember { mutableStateOf(false) }
@@ -170,16 +194,19 @@ fun NexoApp() {
     DisposableEffect(Unit) {
         val locationSubscription = CurrentLocationStateRepository.subscribe { snapshot -> locationSnapshot = snapshot }
         val offerSubscription = OfferSessionMetricsRepository.subscribe { metrics -> sessionMetrics = metrics }
+        val regionMembershipSubscription = RegionMembershipRepository.subscribe { memberships -> regionMemberships = memberships }
         onDispose {
             locationSubscription.close()
             offerSubscription.close()
+            regionMembershipSubscription.close()
         }
     }
 
     BackHandler(
         enabled = editingRuleId != null || showFilterPicker || showPermissionOnboarding ||
             destination == AppDestination.FILTERS || destination == AppDestination.HOME_DESTINATION ||
-            destination == AppDestination.SETTINGS,
+            destination == AppDestination.SETTINGS || destination == AppDestination.VEHICLE_FUEL ||
+            destination == AppDestination.REGIONS,
     ) {
         when {
             editingRuleId != null -> editingRuleId = null
@@ -322,6 +349,30 @@ fun NexoApp() {
                 },
             )
 
+            AppDestination.VEHICLE_FUEL -> VehicleFuelScreen(
+                snapshot = fuelProfileSnapshot,
+                onNavigateBack = { destination = AppDestination.HOME },
+                onSave = { profile -> fuelProfileSnapshot = fuelProfileStore.save(profile) },
+                onDelete = { profileId -> fuelProfileSnapshot = fuelProfileStore.delete(profileId) },
+                onSetActive = { profileId -> fuelProfileSnapshot = fuelProfileStore.setActiveProfile(profileId) },
+            )
+
+            AppDestination.REGIONS -> RegionsScreen(
+                snapshot = regionSnapshot,
+                insideRegionIds = regionMemberships.filter { it.isInside }.map { it.region.id }.toSet(),
+                onNavigateBack = { destination = AppDestination.HOME },
+                onSave = { region -> regionSnapshot = regionStore.save(region) },
+                onDelete = { regionId -> regionSnapshot = regionStore.delete(regionId) },
+                onEnabledChange = { regionId, enabled ->
+                    val region = regionSnapshot.regions.firstOrNull { it.id == regionId }
+                    if (region != null) {
+                        regionSnapshot = regionStore.save(
+                            region.updated(isEnabled = enabled, updatedAtEpochMs = System.currentTimeMillis()),
+                        )
+                    }
+                },
+            )
+
             AppDestination.FILTERS -> FiltersScreen(
                 state = FiltersScreenState(
                     profileName = activeProfile.name,
@@ -375,6 +426,12 @@ fun NexoApp() {
                             kilometresAnalyzed = locationSnapshot.sessionDistanceMeters / 1_000.0,
                             offersEvaluated = sessionMetrics.offersEvaluated,
                             location = locationSnapshot,
+                            fuelVehicleLabel = fuelProfileSnapshot.activeProfile?.vehicleLabel,
+                            fuelEstimateSummary = fuelConsumptionEstimator.estimate(
+                                locationSnapshot.sessionDistanceMeters,
+                                fuelProfileSnapshot.activeProfile,
+                            ).summary(fuelProfileSnapshot.activeProfile?.fuelType),
+                            regionsSummary = regionSnapshot.regions.summary(),
                         ),
                         onReaderEnabledChanged = { enabled ->
                             if (!enabled) {
@@ -390,6 +447,8 @@ fun NexoApp() {
                         },
                         onOpenFilters = { destination = AppDestination.FILTERS },
                         onConfigureHome = { destination = AppDestination.HOME_DESTINATION },
+                        onConfigureFuel = { destination = AppDestination.VEHICLE_FUEL },
+                        onConfigureRegions = { destination = AppDestination.REGIONS },
                         onLocationEnabledChanged = { enabled ->
                             if (!enabled) {
                                 CurrentLocationService.stop(context)
@@ -475,6 +534,8 @@ fun NexoApp() {
                     )
                     AppDestination.FILTERS -> Unit
                     AppDestination.HOME_DESTINATION -> Unit
+                    AppDestination.VEHICLE_FUEL -> Unit
+                    AppDestination.REGIONS -> Unit
                 }
             }
         }
@@ -617,7 +678,8 @@ private fun DriverBottomBar(selected: AppDestination, onSelected: (AppDestinatio
 
 @Composable
 private fun destinationIconRes(destination: AppDestination): Int = when (destination) {
-    AppDestination.HOME, AppDestination.HOME_DESTINATION -> R.drawable.ic_navigation_home
+    AppDestination.HOME, AppDestination.HOME_DESTINATION, AppDestination.VEHICLE_FUEL, AppDestination.REGIONS ->
+        R.drawable.ic_navigation_home
     AppDestination.FILTERS -> R.drawable.ic_navigation_filters
     AppDestination.SETTINGS -> R.drawable.ic_navigation_settings
 }
@@ -627,6 +689,25 @@ private fun DriverDestination.displayName(): String = label ?: originalAddress ?
 private fun DriverDestination.displayDetails(): String = coordinate?.let {
     "${standardizedAddress ?: originalAddress ?: "Endereço resolvido"} · raio ${arrivalRadiusMeters.toInt()} m"
 } ?: "Somente comparação textual · raio ${arrivalRadiusMeters.toInt()} m"
+
+private fun FuelConsumptionEstimate.summary(fuelType: FuelType?): String? {
+    val units = estimatedConsumptionUnits ?: return null
+    val unitLabel = if (fuelType == FuelType.ELECTRIC) "kWh" else "l"
+    return buildString {
+        append("%.1f".format(Locale.forLanguageTag("pt-BR"), units))
+        append(" $unitLabel na sessão")
+        estimatedCostCents?.let { cents ->
+            append(" · R$ ")
+            append("%.2f".format(Locale.forLanguageTag("pt-BR"), cents / 100.0))
+        }
+    }
+}
+
+private fun List<Region>.summary(): String? {
+    if (isEmpty()) return null
+    val enabledCount = count { it.isEnabled }
+    return "$enabledCount de $size ativas"
+}
 
 private fun Context.releaseOfflineMapReadPermission(contentUri: String) {
     runCatching {
