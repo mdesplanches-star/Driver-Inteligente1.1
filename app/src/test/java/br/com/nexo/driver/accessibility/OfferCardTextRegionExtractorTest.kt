@@ -35,6 +35,27 @@ class OfferCardTextRegionExtractorTest {
     }
 
     @Test
+    fun `server driven Uber card can be recognized without brand text`() {
+        val result = OfferCardTextRegionExtractor.extract(
+            rawLines = listOf(
+                "Saldo R$ 18,00",
+                "R$ 31,72",
+                "5 min (2,1 km)",
+                "Rua XV de Novembro",
+                "24 min (13,8 km)",
+                "Avenida das Torres",
+                "4,91 estrelas",
+                "Aceitar",
+            ),
+            layoutHint = "uber",
+        )
+
+        assertNotNull(result)
+        assertTrue(result!!.contains("R$ 31,72"))
+        assertEquals(2, result.count { it.contains("min") })
+    }
+
+    @Test
     fun `99 standard card keeps two route legs`() {
         val result = OfferCardTextRegionExtractor.extract(
             rawLines = listOf(
